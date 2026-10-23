@@ -3,12 +3,10 @@ main = "src/index.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = [ "nodejs_compat" ]
 
-# KV namespaces are created automatically (Deploy button / wrangler deploy / npm run setup).
+# One KV namespace holds everything (login session, webhook state, file keys).
+# It is created automatically (Deploy button / wrangler deploy / npm run setup).
 [[kv_namespaces]]
 binding = "SESSIONS"
-
-[[kv_namespaces]]
-binding = "FILE_MAP"
 
 [observability]
 enabled = true

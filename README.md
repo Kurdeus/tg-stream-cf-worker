@@ -41,7 +41,7 @@ You need four values. Collect them first and the setup takes a couple of minutes
 ### Option 1: the button (no terminal)
 
 1. Click **Deploy to Cloudflare** at the top of this page and sign in.
-2. Paste the four values into the form. The two KV namespaces and the Durable Object are created for you.
+2. Paste the four values into the form. The KV namespace and the Durable Object are created for you.
 3. When the deploy is finished, open your worker address once, for example `https://tg-stream.your-account.workers.dev/`. This registers the Telegram webhook.
 4. Message your bot and send `/start`.
 
@@ -54,7 +54,7 @@ npm install
 npm run setup
 ```
 
-The script logs you in to Cloudflare, creates the KV namespaces, deploys, uploads your secrets and registers the webhook. It also checks that your bot really is an admin of the storage channel before it deploys anything.
+The script logs you in to Cloudflare, creates the KV namespace, deploys, uploads your secrets and registers the webhook. It also checks that your bot really is an admin of the storage channel before it deploys anything.
 
 ### Option 3: by hand
 
@@ -67,7 +67,7 @@ npx wrangler secret put BOT_TOKEN
 npx wrangler secret put BIN_CHANNEL
 ```
 
-Then visit the worker address once. If wrangler asks about KV namespaces, let it create them.
+Then visit the worker address once. If wrangler asks about the KV namespace, let it create it.
 
 ## Check that it works
 
@@ -96,6 +96,7 @@ Open `/setup` on your worker address, for example [https://tg-stream.kurdeus.wor
 | The bot says nothing at all | The webhook is not registered. Open `/setup`. |
 | `Worker exceeded CPU time limit` | A plain Worker request has a very small CPU budget. Make sure the `STREAMER` Durable Object block from `wrangler.toml` is present in your deployed version. |
 | A download stops and resumes again and again | Check the `[dl ...]` lines in the worker's live logs: `CLIENT CLOSED` means the downloader or network dropped, `ERROR` means Telegram did. |
+| `Cannot provision a KV Namespace ... already exists` | A KV namespace with that name is already in your account, usually left over from an earlier attempt. Delete it in the dashboard (Storage & Databases, then KV), or type a different name in the Deploy form. |
 | `Link Expired` | The file was never stored, or the key was removed. Send the file to the bot again. |
 
 ## How it is built
@@ -156,7 +157,7 @@ you ──file──▶ bot ──copy──▶ private channel (storage)
 ### ‏روش اول: دکمه (بدون ترمینال)
 
 1. ‏روی دکمه‌ی «⁦Deploy to Cloudflare⁩» بالای همین صفحه بزنید و وارد حساب شوید.
-2. ‏چهار مقدار بالا را در فرم وارد کنید. دو تا «⁦KV⁩» و «⁦Durable Object⁩» خودکار ساخته می‌شوند.
+2. ‏چهار مقدار بالا را در فرم وارد کنید. «⁦KV⁩» و «⁦Durable Object⁩» خودکار ساخته می‌شوند.
 3. ‏بعد از پایان «⁦deploy⁩»، آدرس ورکر را یک بار باز کنید، مثلاً ⁦`https://tg-stream.your-account.workers.dev/`⁩. با همین کار «⁦webhook⁩» تلگرام ثبت می‌شود.
 4. ‏به ربات پیام بدهید و ⁦`/start`⁩ را بفرستید.
 
@@ -169,7 +170,7 @@ npm install
 npm run setup
 ```
 
-‏این اسکریپت شما را وارد «⁦Cloudflare⁩» می‌کند، «⁦KV⁩»ها را می‌سازد، «⁦deploy⁩» را انجام می‌دهد، «⁦secret⁩»ها را می‌فرستد و «⁦webhook⁩» را ثبت می‌کند. پیش از «⁦deploy⁩» هم چک می‌کند که ربات واقعاً ادمین کانال ذخیره‌سازی هست.
+‏این اسکریپت شما را وارد «⁦Cloudflare⁩» می‌کند، «⁦KV⁩» را می‌سازد، «⁦deploy⁩» را انجام می‌دهد، «⁦secret⁩»ها را می‌فرستد و «⁦webhook⁩» را ثبت می‌کند. پیش از «⁦deploy⁩» هم چک می‌کند که ربات واقعاً ادمین کانال ذخیره‌سازی هست.
 
 ### ‏روش سوم: دستی
 
@@ -182,7 +183,7 @@ npx wrangler secret put BOT_TOKEN
 npx wrangler secret put BIN_CHANNEL
 ```
 
-‏بعد از آن هم یک بار آدرس ورکر را باز کنید. اگر «⁦wrangler⁩» درباره‌ی «⁦KV⁩» سؤال کرد، بگذارید خودش بسازد.
+‏بعد از آن هم یک بار آدرس ورکر را باز کنید. اگر «⁦wrangler⁩» درباره‌ی «⁦KV⁩» سؤال کرد، بگذارید خودش آن را بسازد.
 
 ## ‏مطمئن شوید که کار می‌کند
 
@@ -211,6 +212,7 @@ npx wrangler secret put BIN_CHANNEL
 | ‏ربات هیچ جوابی نمی‌دهد | ‏«⁦webhook⁩» ثبت نشده. ⁦`/setup`⁩ را باز کنید. |
 | ⁦`Worker exceeded CPU time limit`⁩ | ‏سهم ⁦CPU⁩ یک درخواست معمولی ورکر خیلی کم است. مطمئن شوید بلوک «⁦Durable Object⁩» با نام ⁦`STREAMER`⁩ از «⁦wrangler.toml⁩» در نسخه‌ی «⁦deploy⁩» شده‌ی شما هست. |
 | ‏دانلود مدام قطع و وصل می‌شود | ‏خط‌های ⁦`[dl ...]`⁩ را در لاگ زنده‌ی ورکر نگاه کنید. ⁦`CLIENT CLOSED`⁩ یعنی دانلودر یا شبکه قطع کرده، و ⁦`ERROR`⁩ یعنی تلگرام. |
+| ⁦`Cannot provision a KV Namespace ... already exists`⁩ | ‏یک «⁦KV⁩» با همین اسم از قبل توی حساب شما هست، معمولاً از تلاش قبلی باقی مانده. آن را از داشبورد پاک کنید (بخش «⁦Storage & Databases⁩» و بعد «⁦KV⁩») یا توی فرم «⁦Deploy⁩» اسم دیگری بنویسید. |
 | ⁦`Link Expired`⁩ | ‏فایل هیچ‌وقت ذخیره نشده یا کلیدش پاک شده. فایل را دوباره برای ربات بفرستید. |
 
 ## ‏ساختار پروژه

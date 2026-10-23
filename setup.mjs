@@ -69,9 +69,8 @@ async function kv(binding) {
   return id;
 }
 const sessionsId = await kv("SESSIONS");
-const fileMapId = await kv("FILE_MAP");
 let toml = readFileSync("wrangler.toml", "utf8");
-for (const [binding, id] of [["SESSIONS", sessionsId], ["FILE_MAP", fileMapId]]) {
+for (const [binding, id] of [["SESSIONS", sessionsId]]) {
   const re = new RegExp(`(binding = "${binding}"[ \\t]*\\n)(id = "[^"]*"[ \\t]*\\n)?`);
   toml = toml.replace(re, `$1id = "${id}"\n`);
 }
