@@ -1,4 +1,5 @@
 import { handleStream } from "./streamer";
+import { BOT_COMMANDS, START_TEXT, HELP_TEXT, INFO_TEXT, humanSize, escapeHtml } from "./messages";
 
 export interface Env {
     SESSIONS: KVNamespace;
@@ -30,6 +31,15 @@ async function tg(env: Env, method: string, payload?: unknown): Promise<any> {
  * This is the step that was missing: without a webhook Telegram never
  * delivers messages to the Worker, so the bot looks "active" but is silent.
  */
+const COMMANDS_VERSION = "2";
+
+async function ensureCommands(env: Env, force = false): Promise<void> {
+    const key = "commands:version";
+    if (!force && (await env.SESSIONS.get(key)) === COMMANDS_VERSION) return;
+    const r = await tg(env, "setMyCommands", { commands: BOT_COMMANDS });
+    if (r.ok) await env.SESSIONS.put(key, COMMANDS_VERSION);
+}
+
 async function ensureWebhook(env: Env, origin: string, force = false): Promise<any> {
     const hookUrl = `${origin}/bot${env.BOT_TOKEN}`;
     const secret = (await sha256Hex("secret:" + env.BOT_TOKEN)).slice(0, 48);
@@ -37,7 +47,10 @@ async function ensureWebhook(env: Env, origin: string, force = false): Promise<a
 
     if (!force) {
         const current = await env.SESSIONS.get(stateKey);
-        if (current === hookUrl) return { ok: true, skipped: true };
+        if (current === hookUrl) {
+            await ensureCommands(env);
+            return { ok: true, skipped: true };
+        }
     }
 
     const res = await tg(env, "setWebhook", {
@@ -50,9 +63,7 @@ async function ensureWebhook(env: Env, origin: string, force = false): Promise<a
 
     if (res.ok) {
         await env.SESSIONS.put(stateKey, hookUrl);
-        await tg(env, "setMyCommands", {
-            commands: [{ command: "start", description: "Start the bot" }],
-        });
+        await ensureCommands(env, true);
     }
     return res;
 }
@@ -150,10 +161,14 @@ async function handleUpdate(update: any, env: Env, ctx: ExecutionContext, origin
     const messageId = message.message_id;
 
     const text: string = message.text || "";
-    if (/^\/start(@\w+)?(\s|$)/i.test(text)) {
+    const cmd = /^\/(start|help|info)(@\w+)?(\s|$)/i.exec(text)?.[1]?.toLowerCase();
+    if (cmd) {
+        const body = cmd === "start" ? START_TEXT : cmd === "help" ? HELP_TEXT : INFO_TEXT;
         await tg(env, "sendMessage", {
             chat_id: chatId,
-            text: "Send me a file and I will generate a direct download link for it!",
+            text: body,
+            parse_mode: "HTML",
+            link_preview_options: { is_disabled: true },
         });
         return;
     }
@@ -199,9 +214,12 @@ async function handleUpdate(update: any, env: Env, ctx: ExecutionContext, origin
     const base = env.WORKER_URL ? new URL(env.WORKER_URL).origin : origin;
     const directLink = `${base}/dl/${fileId}?name=${encodeURIComponent(fileName)}`;
 
+    const size = humanSize(media.file_size);
     await tg(env, "sendMessage", {
         chat_id: chatId,
-        text: `Direct Link:\n${directLink}`,
+        text: `📎 <b>${escapeHtml(fileName)}</b>${size ? `\n📦 ${size}` : ""}\n\n🔗 لینک مستقیم دانلود:\n${directLink}`,
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
         reply_to_message_id: messageId,
     });
 }
