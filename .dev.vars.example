@@ -1,0 +1,7 @@
+# Telegram API credentials from https://my.telegram.org
+API_ID=
+API_HASH=
+# Token from @BotFather
+BOT_TOKEN=
+# Private channel id used as storage, like -100123456789 (the bot must be an ADMIN there)
+BIN_CHANNEL=

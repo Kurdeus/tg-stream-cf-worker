@@ -1,0 +1,38 @@
+{
+  "name": "tg-stream-cloudflare",
+  "version": "1.0.0",
+  "description": "Industrial Hybrid Slinger Worker",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "setup": "node setup.mjs"
+  },
+  "dependencies": {
+    "big-integer": "^1.6.52",
+    "input": "^1.0.1",
+    "telegram": "^2.26.22"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261023.1",
+    "typescript": "^5.0.0",
+    "wrangler": "^4.152.0"
+  },
+  "type": "module",
+  "cloudflare": {
+    "bindings": {
+      "API_ID": {
+        "description": "Number from https://my.telegram.org (API development tools)."
+      },
+      "API_HASH": {
+        "description": "String from https://my.telegram.org (API development tools)."
+      },
+      "BOT_TOKEN": {
+        "description": "Bot token from [@BotFather](https://t.me/BotFather)."
+      },
+      "BIN_CHANNEL": {
+        "description": "ID of a PRIVATE Telegram channel used as file storage, like -100123456789. Add your bot to it as ADMIN first."
+      }
+    }
+  },
+  "private": true
+}

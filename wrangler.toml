@@ -1,0 +1,23 @@
+name = "tg-stream-worker"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = [ "nodejs_compat" ]
+
+# KV namespaces are created automatically (Deploy button / wrangler deploy / npm run setup).
+[[kv_namespaces]]
+binding = "SESSIONS"
+
+[[kv_namespaces]]
+binding = "FILE_MAP"
+
+[observability]
+enabled = true
+
+# The download streaming runs inside this Durable Object (SQLite-backed, available on the Free plan).
+[[durable_objects.bindings]]
+name = "STREAMER"
+class_name = "StreamerDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["StreamerDO"]
