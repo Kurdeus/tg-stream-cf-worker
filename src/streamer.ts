@@ -85,7 +85,7 @@ export async function handleStream(request: Request, env: any): Promise<Response
 
     let client: TelegramClient | null = null;
     try {
-        const mappingStr = await env.FILE_MAP.get(fileId);
+        const mappingStr = await (env.FILE_MAP ?? env.SESSIONS).get(fileId);
         if (!mappingStr) return new Response("Link Expired.", { status: 404 });
         const mapping = JSON.parse(mappingStr);
         const { cid, mid } = mapping;

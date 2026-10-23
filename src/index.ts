@@ -3,7 +3,7 @@ import { BOT_COMMANDS, START_TEXT, HELP_TEXT, INFO_TEXT, humanSize, escapeHtml }
 
 export interface Env {
     SESSIONS: KVNamespace;
-    FILE_MAP: KVNamespace;
+    FILE_MAP?: KVNamespace; // optional: old deployments keep it, new ones use SESSIONS for everything
     API_ID: string;
     API_HASH: string;
     BOT_TOKEN: string;
@@ -94,9 +94,16 @@ export default {
                 const missing = ["API_ID", "API_HASH", "BOT_TOKEN", "BIN_CHANNEL"].filter(k => !(env as any)[k]);
                 if (!env.BOT_TOKEN) return json({ ok: false, missing_secrets: missing }, 500);
 
+                // This page is public, so it must be safe to open repeatedly: it only touches the
+                // webhook when Telegram is NOT pointing at this worker (first run, or another
+                // worker took the bot over).
                 const me = await tg(env, "getMe");
-                const setHook = await ensureWebhook(env, origin, true);
-                const info = await tg(env, "getWebhookInfo");
+                let info = await tg(env, "getWebhookInfo");
+                let setHook: any = { ok: true, skipped: true };
+                if (info?.result?.url !== `${origin}/bot${env.BOT_TOKEN}`) {
+                    setHook = await ensureWebhook(env, origin, true);
+                    info = await tg(env, "getWebhookInfo");
+                }
                 const hasUrl = !!info?.result?.url;
 
                 let binCheck: any = "BIN_CHANNEL not set";
@@ -113,7 +120,7 @@ export default {
                     ok: !!setHook.ok && hasUrl && missing.length === 0,
                     missing_secrets: missing,
                     bot: me?.result?.username ?? me?.description,
-                    set_webhook: setHook.ok ? "OK" : setHook.description,
+                    set_webhook: setHook.skipped ? "already registered" : (setHook.ok ? "registered now" : setHook.description),
                     webhook_registered: hasUrl,
                     pending_updates: info?.result?.pending_update_count,
                     last_error: info?.result?.last_error_message ?? null,
@@ -205,7 +212,8 @@ async function handleUpdate(update: any, env: Env, ctx: ExecutionContext, origin
         return;
     }
 
-    await env.FILE_MAP.put(fileId, JSON.stringify({
+    // File keys are base64url (no ':'), every other key we store contains ':', so one namespace is enough.
+    await (env.FILE_MAP ?? env.SESSIONS).put(fileId, JSON.stringify({
         cid: env.BIN_CHANNEL,
         mid: copied.result.message_id,
         size: media.file_size,
