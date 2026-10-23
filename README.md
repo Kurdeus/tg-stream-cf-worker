@@ -71,7 +71,7 @@ Then visit the worker address once. If wrangler asks about KV namespaces, let it
 
 ## Check that it works
 
-Open `/setup` on your worker address. You get a small JSON report:
+Open `/setup` on your worker address, for example [https://tg-stream.kurdeus.workers.dev/setup](https://tg-stream.kurdeus.workers.dev/setup) (that is the author's own deployment, yours will have a different name). Opening it again and again is safe: it only re-registers the webhook when Telegram is not pointing at this worker. You get a small JSON report:
 
 | Field | What it tells you |
 |---|---|
@@ -107,9 +107,13 @@ Open `/setup` on your worker address. You get a small JSON report:
 
 ## Limits worth knowing
 
-- `/setup` is open to anyone who knows your worker address. It never prints your token, but you may want to remove the route once everything works.
+- `/setup` is open to anyone who knows your worker address. It never prints your token and changes nothing when everything is already set up, but you may still want to remove the route once everything works.
 - Free Cloudflare plans have daily request quotas. A busy public bot can use them up.
 - This project depends on a third-party MTProto library and on Cloudflare's current limits, both of which change over time.
+
+## License
+
+Released under the [MIT License](LICENSE). This version started from [Vickydmt/tg-stream-cloudflare](https://github.com/Vickydmt/tg-stream-cloudflare), which does not state a license, so the MIT License covers the work added in this repository and cannot grant rights to the original author's code. Dependencies keep their own licenses.
 
 ## Credits
 
@@ -182,7 +186,7 @@ npx wrangler secret put BIN_CHANNEL
 
 ## ‏مطمئن شوید که کار می‌کند
 
-‏آدرس ⁦`/setup`⁩ ورکر را باز کنید. یک گزارش کوتاه «⁦JSON⁩» می‌بینید:
+‏آدرس ⁦`/setup`⁩ ورکر را باز کنید، مثلاً [⁦https://tg-stream.kurdeus.workers.dev/setup⁩](https://tg-stream.kurdeus.workers.dev/setup) (این ورکر خود نویسنده است و اسم ورکر شما فرق می‌کند). باز کردن مکرر این آدرس خطری ندارد: فقط وقتی تلگرام به این ورکر اشاره نکند «⁦webhook⁩» را دوباره ثبت می‌کند. یک گزارش کوتاه «⁦JSON⁩» می‌بینید:
 
 | ‏فیلد | ‏معنی |
 |---|---|
@@ -218,9 +222,13 @@ npx wrangler secret put BIN_CHANNEL
 
 ## ‏نکاتی که باید بدانید
 
-- ‏آدرس ⁦`/setup`⁩ برای هر کسی که آدرس ورکرتان را بداند بازه. توکن را نشان نمی‌دهد، ولی بعد از اینکه همه‌چیز راه افتاد شاید بخواهید این مسیر را حذف کنید.
+- ‏آدرس ⁦`/setup`⁩ برای هر کسی که آدرس ورکرتان را بداند بازه. توکن را نشان نمی‌دهد و وقتی همه‌چیز راه افتاده باشد چیزی را تغییر نمی‌دهد، ولی بعد از راه افتادن همه‌چیز باز هم شاید بخواهید این مسیر را حذف کنید.
 - ‏پلن رایگان «⁦Cloudflare⁩» سهمیه‌ی روزانه‌ی درخواست دارد و یک ربات عمومی پرمراجعه می‌تواند آن را تمام کند.
 - ‏این پروژه به یک کتابخانه‌ی «⁦MTProto⁩» از یک نویسنده‌ی دیگر و به محدودیت‌های فعلی «⁦Cloudflare⁩» وابسته است و هر دو ممکن است عوض شوند.
+
+## ‏مجوز
+
+‏این پروژه با [مجوز ⁦MIT⁩](LICENSE) منتشر شده است. این نسخه از [⁦Vickydmt/tg-stream-cloudflare⁩](https://github.com/Vickydmt/tg-stream-cloudflare) شروع شد که مجوزی اعلام نکرده، پس مجوز ⁦MIT⁩ کارهایی را پوشش می‌دهد که در همین ریپو اضافه شده و نمی‌تواند حقی نسبت به کد نویسنده‌ی اصلی بدهد. کتابخانه‌های وابسته هم مجوز خودشان را دارند.
 
 ## ‏تشکر
 
