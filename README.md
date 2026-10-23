@@ -23,7 +23,7 @@
 
 ---
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Kurdeus/tg-stream-cloudflare)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Kurdeus/tg-stream-cf-worker)
 
 > If you forked this repo, replace `Kurdeus/tg-stream-cloudflare` in the button link with your own `username/repo`. The repo must be **public**.
 
