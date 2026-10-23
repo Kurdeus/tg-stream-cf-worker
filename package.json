@@ -1,5 +1,5 @@
 {
-  "name": "tg-stream-cloudflare",
+  "name": "tg-stream-cf-worker",
   "version": "1.0.0",
   "description": "Industrial Hybrid Slinger Worker",
   "scripts": {
