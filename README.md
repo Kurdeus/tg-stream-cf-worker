@@ -76,6 +76,7 @@ Open `/setup` on your worker address, for example [https://tg-stream.kurdeus.wor
 | Field | What it tells you |
 |---|---|
 | `ok` | `true` when everything below is fine. |
+| `api_id`, `api_hash` | Whether the two Telegram credentials look valid. |
 | `missing_secrets` | Names of secrets you forgot to set. |
 | `webhook_registered` | Whether Telegram knows where to send messages. |
 | `last_error` | The last delivery error Telegram reported, if any. |
@@ -84,9 +85,11 @@ Open `/setup` on your worker address, for example [https://tg-stream.kurdeus.wor
 
 ## Using the bot
 
-1. Send `/start` for a short introduction. `/help` shows tips and `/info` links to the source code.
-2. Send any document, video, audio file, voice note or animation.
-3. Copy the link the bot sends back and open it anywhere.
+1. Send `/start`. The first time, the bot asks which language you want, Persian (فارسی) or English, and remembers your choice for next time.
+2. Change the language whenever you like with `/language` or the button under the welcome message.
+3. `/help` shows tips and `/info` links to the source code.
+4. Send any document, video, audio file, voice note or animation.
+5. Copy the link the bot sends back and open it anywhere.
 
 ## If something goes wrong
 
@@ -97,12 +100,14 @@ Open `/setup` on your worker address, for example [https://tg-stream.kurdeus.wor
 | `Worker exceeded CPU time limit` | A plain Worker request has a very small CPU budget. Make sure the `STREAMER` Durable Object block from `wrangler.toml` is present in your deployed version. |
 | A download stops and resumes again and again | Check the `[dl ...]` lines in the worker's live logs: `CLIENT CLOSED` means the downloader or network dropped, `ERROR` means Telegram did. |
 | `Cannot provision a KV Namespace ... already exists` | A KV namespace with that name is already in your account, usually left over from an earlier attempt. Delete it in the dashboard (Storage & Databases, then KV), or type a different name in the Deploy form. |
+| `The value of "value" is out of range` or `API_ID is invalid` | The `API_ID` secret is wrong. The number is too big for Telegram's 32-bit field, so it is probably your bot's id or your own user id. Use the App api_id from [my.telegram.org](https://my.telegram.org), set the secret again (Settings, then Variables and Secrets) and open `/setup`: it checks `API_ID` and `API_HASH` for you. |
+| The language buttons do nothing | Telegram is not delivering button presses to the worker. Open `/setup`: it re-registers the webhook with button support. |
 | `Link Expired` | The file was never stored, or the key was removed. Send the file to the bot again. |
 
 ## How it is built
 
 - `src/index.ts` receives Telegram updates, registers the webhook, copies each file into the storage channel and builds the link.
-- `src/messages.ts` holds every text the bot sends (welcome, help, info). Edit it to change the wording.
+- `src/messages.ts` holds every text the bot sends, in Persian and English. Edit it to change the wording, or add an entry to `T` (and a button in `langKeyboard`) to support another language. Each person's choice is stored in KV under `lang:<user id>`.
 - `src/streamer.ts` opens its own MTProto connection for every download request, reads the stored message, and streams it with support for `Range` requests. If Telegram stalls, it reconnects and continues from the exact byte.
 - The streaming itself runs inside a SQLite-backed Durable Object, so the heavy decryption does not count against the small CPU budget of a normal Worker request.
 
@@ -192,6 +197,7 @@ npx wrangler secret put BIN_CHANNEL
 | ‏فیلد | ‏معنی |
 |---|---|
 | ⁦`ok`⁩ | ‏وقتی همه‌چیز درست باشد ⁦`true`⁩ است. |
+| ‏⁦`api_id`⁩ و ⁦`api_hash`⁩ | ‏اینکه دو مقدار اعتبارنامه‌ی تلگرام معتبر به نظر می‌رسند یا نه. |
 | ⁦`missing_secrets`⁩ | ‏اسم «⁦secret⁩»هایی که فراموش کرده‌اید. |
 | ⁦`webhook_registered`⁩ | ‏اینکه تلگرام می‌داند پیام‌ها را کجا بفرستد یا نه. |
 | ⁦`last_error`⁩ | ‏آخرین خطای تحویل پیام که تلگرام گزارش کرده است. |
@@ -200,9 +206,11 @@ npx wrangler secret put BIN_CHANNEL
 
 ## ‏استفاده از ربات
 
-1. ‏با ⁦`/start`⁩ معرفی کوتاه ربات را ببینید. ⁦`/help`⁩ راهنما و ⁦`/info`⁩ لینک سورس را نشان می‌دهد.
-2. ‏هر سند، ویدیو، فایل صوتی، «⁦voice⁩» یا «⁦animation⁩» که بخواهید بفرستید.
-3. ‏لینکی را که ربات برمی‌گرداند کپی کنید و هر جا خواستید باز کنید.
+1. ‏⁦`/start`⁩ را بفرستید. بار اول ربات می‌پرسد کدام زبان را می‌خواهید، فارسی یا انگلیسی (⁦English⁩)، و انتخابتان را برای دفعه‌های بعد یادش می‌ماند.
+2. ‏هر وقت خواستید با ⁦`/language`⁩ یا دکمه‌ی زیر پیام خوش‌آمد زبان را عوض کنید.
+3. ‏⁦`/help`⁩ راهنما و ⁦`/info`⁩ لینک سورس را نشان می‌دهد.
+4. ‏هر سند، ویدیو، فایل صوتی، «⁦voice⁩» یا «⁦animation⁩» که بخواهید بفرستید.
+5. ‏لینکی را که ربات برمی‌گرداند کپی کنید و هر جا خواستید باز کنید.
 
 ## ‏اگر مشکلی پیش آمد
 
@@ -213,12 +221,14 @@ npx wrangler secret put BIN_CHANNEL
 | ⁦`Worker exceeded CPU time limit`⁩ | ‏سهم ⁦CPU⁩ یک درخواست معمولی ورکر خیلی کم است. مطمئن شوید بلوک «⁦Durable Object⁩» با نام ⁦`STREAMER`⁩ از «⁦wrangler.toml⁩» در نسخه‌ی «⁦deploy⁩» شده‌ی شما هست. |
 | ‏دانلود مدام قطع و وصل می‌شود | ‏خط‌های ⁦`[dl ...]`⁩ را در لاگ زنده‌ی ورکر نگاه کنید. ⁦`CLIENT CLOSED`⁩ یعنی دانلودر یا شبکه قطع کرده، و ⁦`ERROR`⁩ یعنی تلگرام. |
 | ⁦`Cannot provision a KV Namespace ... already exists`⁩ | ‏یک «⁦KV⁩» با همین اسم از قبل توی حساب شما هست، معمولاً از تلاش قبلی باقی مانده. آن را از داشبورد پاک کنید (بخش «⁦Storage & Databases⁩» و بعد «⁦KV⁩») یا توی فرم «⁦Deploy⁩» اسم دیگری بنویسید. |
+| ‏⁦`The value of "value" is out of range`⁩ یا ⁦`API_ID is invalid`⁩ | ‏«⁦secret⁩» با نام ⁦`API_ID`⁩ اشتباه است. این عدد برای فیلد ۳۲ بیتی تلگرام بزرگ‌تر است، پس احتمالاً شناسه‌ی خود ربات یا شناسه‌ی کاربری شماست. «⁦App api_id⁩» را از [⁦my.telegram.org⁩](https://my.telegram.org) بردارید، «⁦secret⁩» را دوباره تنظیم کنید (بخش «⁦Settings⁩» و بعد «⁦Variables and Secrets⁩») و ⁦`/setup`⁩ را باز کنید: ⁦`API_ID`⁩ و ⁦`API_HASH`⁩ را برایتان چک می‌کند. |
+| ‏دکمه‌های زبان کار نمی‌کنند | ‏تلگرام فشرده شدن دکمه‌ها را به ورکر نمی‌رساند. ⁦`/setup`⁩ را باز کنید: «⁦webhook⁩» را با پشتیبانی از دکمه دوباره ثبت می‌کند. |
 | ⁦`Link Expired`⁩ | ‏فایل هیچ‌وقت ذخیره نشده یا کلیدش پاک شده. فایل را دوباره برای ربات بفرستید. |
 
 ## ‏ساختار پروژه
 
 - ‏⁦`src/index.ts`⁩ پیام‌های تلگرام را می‌گیرد، «⁦webhook⁩» را ثبت می‌کند، هر فایل را به کانال ذخیره‌سازی کپی می‌کند و لینک را می‌سازد.
-- ‏⁦`src/messages.ts`⁩ همه‌ی متن‌هایی را که ربات می‌فرستد (خوش‌آمد، راهنما، درباره) نگه می‌دارد. برای عوض کردن جمله‌ها همین فایل را ویرایش کنید.
+- ‏⁦`src/messages.ts`⁩ همه‌ی متن‌هایی را که ربات می‌فرستد، به فارسی و انگلیسی، نگه می‌دارد. برای عوض کردن جمله‌ها همین فایل را ویرایش کنید. برای افزودن زبان تازه یک ورودی به ⁦`T`⁩ و یک دکمه در ⁦`langKeyboard`⁩ اضافه کنید. انتخاب هر کاربر در «⁦KV⁩» با کلید ⁦`lang:<user id>`⁩ ذخیره می‌شود.
 - ‏⁦`src/streamer.ts`⁩ برای هر درخواست دانلود یک اتصال «⁦MTProto⁩» جدا باز می‌کند، پیام ذخیره‌شده را می‌خواند و با پشتیبانی از «⁦Range⁩» پخش می‌کند. اگر تلگرام گیر کند، دوباره وصل می‌شود و از همان بایت ادامه می‌دهد.
 - ‏خودِ پخش داخل یک «⁦Durable Object⁩» با ذخیره‌ساز «⁦SQLite⁩» اجرا می‌شود، تا رمزگشایی سنگین از سهم کوچک ⁦CPU⁩ یک درخواست معمولی ورکر کم نشود.
 

@@ -21,10 +21,10 @@
   "cloudflare": {
     "bindings": {
       "API_ID": {
-        "description": "Number from https://my.telegram.org (API development tools)."
+        "description": "The numeric **App api_id** from https://my.telegram.org (API development tools), usually 7-8 digits. It is NOT your Telegram user id and NOT the number in front of the colon in the bot token."
       },
       "API_HASH": {
-        "description": "String from https://my.telegram.org (API development tools)."
+        "description": "The 32-character **App api_hash** from https://my.telegram.org (API development tools)."
       },
       "BOT_TOKEN": {
         "description": "Bot token from [@BotFather](https://t.me/BotFather)."

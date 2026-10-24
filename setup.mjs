@@ -40,12 +40,15 @@ const BOT_TOKEN = await ask("BOT_TOKEN", "from @BotFather");
 const BIN_CHANNEL = await ask("BIN_CHANNEL", "private channel id like -100123456789, bot must be ADMIN there");
 rl.close();
 if (!API_ID || !API_HASH || !BOT_TOKEN || !BIN_CHANNEL) die("All four values are required.");
+if (!/^\d+$/.test(API_ID) || Number(API_ID) > 2147483647) die("API_ID must be the numeric App api_id from https://my.telegram.org (usually 7-8 digits). It is not the bot id or your Telegram user id.");
+if (!/^[0-9a-f]{32}$/i.test(API_HASH)) die("API_HASH must be the 32-character hex string from https://my.telegram.org.");
 if (!/^-100\d+$/.test(BIN_CHANNEL)) die("BIN_CHANNEL must look like -100123456789 (note the -100 prefix).");
 
 log("Validating bot token with Telegram...");
 const me = await (await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getMe`)).json();
 if (!me.ok) die("Telegram rejected BOT_TOKEN: " + me.description);
 console.log("Bot: @" + me.result.username);
+if (String(me.result.id) === API_ID) die("API_ID is the bot's own id. Use the App api_id from https://my.telegram.org instead.");
 
 const member = await (await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getChatMember`, {
   method: "POST", headers: { "Content-Type": "application/json" },
