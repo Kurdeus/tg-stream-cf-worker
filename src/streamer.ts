@@ -21,10 +21,19 @@ function toBuffer(data: any): Buffer {
  * The login session is kept in KV, so a new connection costs only a short handshake.
  */
 async function newClient(env: any): Promise<TelegramClient> {
+    // A wrong API_ID otherwise surfaces as a cryptic 32-bit "out of range" error deep inside GramJS.
+    const apiId = Number(env.API_ID);
+    if (!Number.isInteger(apiId) || apiId <= 0 || apiId > 2147483647) {
+        throw new Error(
+            `API_ID is invalid (${String(env.API_ID ?? "").length} digits given). ` +
+            `Use the numeric "App api_id" from https://my.telegram.org (usually 7-8 digits). ` +
+            `It is NOT the bot id, the bot token or a Telegram user id.`
+        );
+    }
     const sessionKey = "session:gramjs:" + env.BOT_TOKEN;
     const savedSession = await env.SESSIONS.get(sessionKey);
 
-    const client = new TelegramClient(new StringSession(savedSession || ""), Number(env.API_ID), env.API_HASH, {
+    const client = new TelegramClient(new StringSession(savedSession || ""), apiId, env.API_HASH, {
         connectionRetries: 5,
         useWSS: true,
         autoReconnect: false

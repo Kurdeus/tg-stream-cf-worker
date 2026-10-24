@@ -1,5 +1,5 @@
 import { handleStream } from "./streamer";
-import { BOT_COMMANDS, START_TEXT, HELP_TEXT, INFO_TEXT, humanSize, escapeHtml } from "./messages";
+import { T, Lang, PICK_LANGUAGE_TEXT, langKeyboard, changeLangKeyboard, langFromCode, humanSize, escapeHtml } from "./messages";
 
 export interface Env {
     SESSIONS: KVNamespace;
@@ -31,23 +31,42 @@ async function tg(env: Env, method: string, payload?: unknown): Promise<any> {
  * This is the step that was missing: without a webhook Telegram never
  * delivers messages to the Worker, so the bot looks "active" but is silent.
  */
-const COMMANDS_VERSION = "2";
+const COMMANDS_VERSION = "3";
+// Bump when allowed_updates changes so existing deployments re-register their webhook once.
+const WEBHOOK_VERSION = "2";
+const ALLOWED_UPDATES = ["message", "edited_message", "callback_query"];
 
 async function ensureCommands(env: Env, force = false): Promise<void> {
     const key = "commands:version";
     if (!force && (await env.SESSIONS.get(key)) === COMMANDS_VERSION) return;
-    const r = await tg(env, "setMyCommands", { commands: BOT_COMMANDS });
-    if (r.ok) await env.SESSIONS.put(key, COMMANDS_VERSION);
+    const en = await tg(env, "setMyCommands", { commands: T.en.commands });
+    const fa = await tg(env, "setMyCommands", { commands: T.fa.commands, language_code: "fa" });
+    if (en.ok && fa.ok) await env.SESSIONS.put(key, COMMANDS_VERSION);
+}
+
+// ---- Per-user language ---------------------------------------------------------------------
+async function getSavedLang(env: Env, userId: number | string): Promise<Lang | null> {
+    const v = await env.SESSIONS.get(`lang:${userId}`);
+    return v === "fa" || v === "en" ? v : null;
+}
+
+async function getLang(env: Env, userId: number | string, telegramCode?: string): Promise<Lang> {
+    return (await getSavedLang(env, userId)) ?? langFromCode(telegramCode);
+}
+
+async function setLang(env: Env, userId: number | string, lang: Lang): Promise<void> {
+    await env.SESSIONS.put(`lang:${userId}`, lang);
 }
 
 async function ensureWebhook(env: Env, origin: string, force = false): Promise<any> {
     const hookUrl = `${origin}/bot${env.BOT_TOKEN}`;
     const secret = (await sha256Hex("secret:" + env.BOT_TOKEN)).slice(0, 48);
     const stateKey = "webhook:url";
+    const stateValue = `${hookUrl}|v${WEBHOOK_VERSION}`;
 
     if (!force) {
         const current = await env.SESSIONS.get(stateKey);
-        if (current === hookUrl) {
+        if (current === stateValue) {
             await ensureCommands(env);
             return { ok: true, skipped: true };
         }
@@ -56,13 +75,14 @@ async function ensureWebhook(env: Env, origin: string, force = false): Promise<a
     const res = await tg(env, "setWebhook", {
         url: hookUrl,
         secret_token: secret,
-        allowed_updates: ["message", "edited_message"],
-        drop_pending_updates: true,
+        allowed_updates: ALLOWED_UPDATES,
+        // Only throw queued updates away when repairing a wrong webhook, not on a silent upgrade.
+        drop_pending_updates: force,
         max_connections: 40,
     });
 
     if (res.ok) {
-        await env.SESSIONS.put(stateKey, hookUrl);
+        await env.SESSIONS.put(stateKey, stateValue);
         await ensureCommands(env, true);
     }
     return res;
@@ -100,11 +120,23 @@ export default {
                 const me = await tg(env, "getMe");
                 let info = await tg(env, "getWebhookInfo");
                 let setHook: any = { ok: true, skipped: true };
-                if (info?.result?.url !== `${origin}/bot${env.BOT_TOKEN}`) {
+                const allowed = info?.result?.allowed_updates;
+                const missingButtons = Array.isArray(allowed) && !allowed.includes("callback_query");
+                if (info?.result?.url !== `${origin}/bot${env.BOT_TOKEN}` || missingButtons) {
                     setHook = await ensureWebhook(env, origin, true);
                     info = await tg(env, "getWebhookInfo");
                 }
                 const hasUrl = !!info?.result?.url;
+
+                // Credentials that are present but wrong are the most common "it deploys but nothing works" cause.
+                const apiIdStr = String(env.API_ID ?? "");
+                let apiIdCheck = "OK";
+                if (!/^\d{1,10}$/.test(apiIdStr) || Number(apiIdStr) <= 0 || Number(apiIdStr) > 2147483647) {
+                    apiIdCheck = `invalid: must be the numeric App api_id from my.telegram.org, usually 7-8 digits (${apiIdStr.length} characters given)`;
+                } else if (me?.result?.id && apiIdStr === String(me.result.id)) {
+                    apiIdCheck = "invalid: this is the bot's own id, not the App api_id";
+                }
+                const apiHashCheck = /^[0-9a-f]{32}$/i.test(String(env.API_HASH ?? "")) ? "OK" : "invalid: must be 32 hex characters from my.telegram.org";
 
                 let binCheck: any = "BIN_CHANNEL not set";
                 if (env.BIN_CHANNEL) {
@@ -117,8 +149,10 @@ export default {
                 const lastStreamError = await env.SESSIONS.get("debug:last_stream_error");
 
                 return json({
-                    ok: !!setHook.ok && hasUrl && missing.length === 0,
+                    ok: !!setHook.ok && hasUrl && missing.length === 0 && apiIdCheck === "OK" && apiHashCheck === "OK",
                     missing_secrets: missing,
+                    api_id: apiIdCheck,
+                    api_hash: apiHashCheck,
                     bot: me?.result?.username ?? me?.description,
                     set_webhook: setHook.skipped ? "already registered" : (setHook.ok ? "registered now" : setHook.description),
                     webhook_registered: hasUrl,
@@ -160,22 +194,90 @@ export default {
     },
 };
 
+async function sendLanguagePicker(env: Env, chatId: number | string): Promise<void> {
+    await tg(env, "sendMessage", {
+        chat_id: chatId,
+        text: PICK_LANGUAGE_TEXT,
+        reply_markup: langKeyboard(),
+    });
+}
+
+/** Handles presses on the inline buttons (language picker and the "change language" button). */
+async function handleCallback(cq: any, env: Env): Promise<void> {
+    const m = /^lang:(fa|en|menu)$/.exec(String(cq.data ?? ""));
+    const chatId = cq.message?.chat?.id;
+    const messageId = cq.message?.message_id;
+
+    if (!m) {
+        await tg(env, "answerCallbackQuery", { callback_query_id: cq.id });
+        return;
+    }
+
+    if (m[1] === "menu") {
+        await tg(env, "answerCallbackQuery", { callback_query_id: cq.id });
+        if (chatId !== undefined && messageId !== undefined) {
+            await tg(env, "editMessageText", {
+                chat_id: chatId,
+                message_id: messageId,
+                text: PICK_LANGUAGE_TEXT,
+                reply_markup: langKeyboard(),
+            });
+        }
+        return;
+    }
+
+    const lang = m[1] as Lang;
+    await setLang(env, cq.from.id, lang);
+    await tg(env, "answerCallbackQuery", { callback_query_id: cq.id, text: T[lang].langSet });
+    if (chatId !== undefined && messageId !== undefined) {
+        await tg(env, "editMessageText", {
+            chat_id: chatId,
+            message_id: messageId,
+            text: T[lang].start,
+            parse_mode: "HTML",
+            link_preview_options: { is_disabled: true },
+            reply_markup: changeLangKeyboard(lang),
+        });
+    }
+}
+
 async function handleUpdate(update: any, env: Env, ctx: ExecutionContext, origin: string): Promise<void> {
+    if (update.callback_query) {
+        await handleCallback(update.callback_query, env);
+        return;
+    }
+
     const message = update.message || update.edited_message;
     if (!message) return;
 
     const chatId = message.chat.id;
     const messageId = message.message_id;
+    const userId = message.from?.id ?? chatId;
 
     const text: string = message.text || "";
-    const cmd = /^\/(start|help|info)(@\w+)?(\s|$)/i.exec(text)?.[1]?.toLowerCase();
+    const cmd = /^\/(start|help|info|language|lang)(@\w+)?(\s|$)/i.exec(text)?.[1]?.toLowerCase();
     if (cmd) {
-        const body = cmd === "start" ? START_TEXT : cmd === "help" ? HELP_TEXT : INFO_TEXT;
+        if (cmd === "language" || cmd === "lang") {
+            await sendLanguagePicker(env, chatId);
+            return;
+        }
+
+        const saved = await getSavedLang(env, userId);
+
+        // First /start: let the person choose before anything else. They can change it later with /language.
+        if (cmd === "start" && !saved) {
+            await sendLanguagePicker(env, chatId);
+            return;
+        }
+
+        const lang = saved ?? langFromCode(message.from?.language_code);
+        const t = T[lang];
         await tg(env, "sendMessage", {
             chat_id: chatId,
-            text: body,
+            text: cmd === "start" ? t.start : cmd === "help" ? t.help : t.info,
             parse_mode: "HTML",
             link_preview_options: { is_disabled: true },
+            ...(cmd === "start" ? { reply_markup: changeLangKeyboard(lang) } : {}),
         });
         return;
     }
@@ -183,10 +285,13 @@ async function handleUpdate(update: any, env: Env, ctx: ExecutionContext, origin
     const media = message.document || message.video || message.audio || message.voice || message.video_note || message.animation;
     if (!media) return;
 
+    const lang = await getLang(env, userId, message.from?.language_code);
+    const t = T[lang];
+
     if (!env.BIN_CHANNEL) {
         await tg(env, "sendMessage", {
             chat_id: chatId,
-            text: "Server setup incomplete: BIN_CHANNEL secret is not set.",
+            text: t.setupIncomplete,
             reply_to_message_id: messageId,
         });
         return;
@@ -206,7 +311,7 @@ async function handleUpdate(update: any, env: Env, ctx: ExecutionContext, origin
     if (!copied.ok) {
         await tg(env, "sendMessage", {
             chat_id: chatId,
-            text: `Could not store the file in BIN_CHANNEL.\nTelegram says: ${copied.description}\n\nMake sure the bot is an ADMIN of that channel and BIN_CHANNEL is the correct id (e.g. -100123456789).`,
+            text: t.storeFailed(String(copied.description ?? "unknown error")),
             reply_to_message_id: messageId,
         });
         return;
@@ -225,7 +330,7 @@ async function handleUpdate(update: any, env: Env, ctx: ExecutionContext, origin
     const size = humanSize(media.file_size);
     await tg(env, "sendMessage", {
         chat_id: chatId,
-        text: `📎 <b>${escapeHtml(fileName)}</b>${size ? `\n📦 ${size}` : ""}\n\n🔗 لینک مستقیم دانلود:\n${directLink}`,
+        text: `📎 <b>${escapeHtml(fileName)}</b>${size ? `\n📦 ${size}` : ""}\n\n${t.linkHeader}\n${directLink}`,
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
         reply_to_message_id: messageId,
