@@ -1,36 +1,17 @@
 import { handleStream } from "./streamer";
-import { T, Lang, PICK_LANGUAGE_TEXT, langKeyboard, changeLangKeyboard, langFromCode, humanSize, escapeHtml } from "./messages";
+import type { Env } from "./env";
+import { tg } from "./telegram";
+import { adminIds, isAdmin, isAwaitingToken, handleAdminCommand, handleAdminCallback, handleAdminToken } from "./admin";
+import { getHelpers } from "./bots";
 
-export interface Env {
-    SESSIONS: KVNamespace;
-    FILE_MAP?: KVNamespace; // optional: old deployments keep it, new ones use SESSIONS for everything
-    API_ID: string;
-    API_HASH: string;
-    BOT_TOKEN: string;
-    WORKER_URL?: string;
-    BIN_CHANNEL?: string;
-    STREAMER: DurableObjectNamespace;
-}
+export type { Env };
+import { T, Lang, PICK_LANGUAGE_TEXT, langKeyboard, changeLangKeyboard, langFromCode, humanSize, escapeHtml } from "./messages";
 
 async function sha256Hex(text: string): Promise<string> {
     const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
     return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function tg(env: Env, method: string, payload?: unknown): Promise<any> {
-    const res = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload ?? {}),
-    });
-    return res.json();
-}
-
-/**
- * Registers the Telegram webhook (idempotent).
- * This is the step that was missing: without a webhook Telegram never
- * delivers messages to the Worker, so the bot looks "active" but is silent.
- */
 const COMMANDS_VERSION = "3";
 // Bump when allowed_updates changes so existing deployments re-register their webhook once.
 const WEBHOOK_VERSION = "2";
@@ -58,6 +39,11 @@ async function setLang(env: Env, userId: number | string, lang: Lang): Promise<v
     await env.SESSIONS.put(`lang:${userId}`, lang);
 }
 
+/**
+ * Registers the Telegram webhook (idempotent).
+ * This is the step that was missing: without a webhook Telegram never
+ * delivers messages to the Worker, so the bot looks "active" but is silent.
+ */
 async function ensureWebhook(env: Env, origin: string, force = false): Promise<any> {
     const hookUrl = `${origin}/bot${env.BOT_TOKEN}`;
     const secret = (await sha256Hex("secret:" + env.BOT_TOKEN)).slice(0, 48);
@@ -88,6 +74,8 @@ async function ensureWebhook(env: Env, origin: string, force = false): Promise<a
     return res;
 }
 
+let lastEnsureAt = 0; // per isolate, so a flood of GET / cannot burn the daily KV read quota
+
 function json(data: unknown, status = 200): Response {
     return new Response(JSON.stringify(data, null, 2), {
         status,
@@ -104,7 +92,10 @@ export default {
         try {
             // ---- Health + lazy auto-setup -------------------------------------------------
             if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/status")) {
-                if (env.BOT_TOKEN) ctx.waitUntil(ensureWebhook(env, origin).catch(() => { }));
+                if (env.BOT_TOKEN && Date.now() - lastEnsureAt > 30_000) {
+                    lastEnsureAt = Date.now();
+                    ctx.waitUntil(ensureWebhook(env, origin).catch(() => { }));
+                }
                 return new Response("Bot Active.", { status: 200 });
             }
 
@@ -122,11 +113,12 @@ export default {
                 let setHook: any = { ok: true, skipped: true };
                 const allowed = info?.result?.allowed_updates;
                 const missingButtons = Array.isArray(allowed) && !allowed.includes("callback_query");
-                if (info?.result?.url !== `${origin}/bot${env.BOT_TOKEN}` || missingButtons) {
+                if (info?.ok && (info.result?.url !== `${origin}/bot${env.BOT_TOKEN}` || missingButtons)) {
                     setHook = await ensureWebhook(env, origin, true);
                     info = await tg(env, "getWebhookInfo");
                 }
                 const hasUrl = !!info?.result?.url;
+                if (!info?.ok) setHook = { ok: false, description: `getWebhookInfo failed: ${info?.description ?? "unknown error"}` };
 
                 // Credentials that are present but wrong are the most common "it deploys but nothing works" cause.
                 const apiIdStr = String(env.API_ID ?? "");
@@ -151,6 +143,8 @@ export default {
                 return json({
                     ok: !!setHook.ok && hasUrl && missing.length === 0 && apiIdCheck === "OK" && apiHashCheck === "OK",
                     missing_secrets: missing,
+                    admins_configured: adminIds(env).size,
+                    helper_bots: (await getHelpers(env)).length,
                     api_id: apiIdCheck,
                     api_hash: apiHashCheck,
                     bot: me?.result?.username ?? me?.description,
@@ -204,6 +198,10 @@ async function sendLanguagePicker(env: Env, chatId: number | string): Promise<vo
 
 /** Handles presses on the inline buttons (language picker and the "change language" button). */
 async function handleCallback(cq: any, env: Env): Promise<void> {
+    if (String(cq.data ?? "").startsWith("adm:")) {
+        await handleAdminCallback(env, cq, await getLang(env, cq.from.id, cq.from.language_code));
+        return;
+    }
     const m = /^lang:(fa|en|menu)$/.exec(String(cq.data ?? ""));
     const chatId = cq.message?.chat?.id;
     const messageId = cq.message?.message_id;
@@ -255,7 +253,25 @@ async function handleUpdate(update: any, env: Env, ctx: ExecutionContext, origin
     const userId = message.from?.id ?? chatId;
 
     const text: string = message.text || "";
-    const cmd = /^\/(start|help|info|language|lang)(@\w+)?(\s|$)/i.exec(text)?.[1]?.toLowerCase();
+
+    // The admin panel is waiting for a bot token (or the admin cancels with /cancel).
+    if (text && message.chat.type === "private" && isAdmin(env, userId)
+        && (!text.startsWith("/") || /^\/cancel\b/i.test(text))
+        && await isAwaitingToken(env, userId)) {
+        await handleAdminToken(env, message, await getLang(env, userId, message.from?.language_code), text);
+        return;
+    }
+
+    const cmd = /^\/(start|help|info|language|lang|admin|addbot)(@\w+)?(\s|$)/i.exec(text)?.[1]?.toLowerCase();
+    if (cmd === "admin" || cmd === "addbot") {
+        const adminLang = await getLang(env, userId, message.from?.language_code);
+        if (cmd === "addbot" && message.chat.type === "private" && isAdmin(env, userId)) {
+            await handleAdminToken(env, message, adminLang, text.replace(/^\/addbot(@\w+)?\s*/i, ""));
+        } else {
+            await handleAdminCommand(env, message, adminLang);
+        }
+        return;
+    }
     if (cmd) {
         if (cmd === "language" || cmd === "lang") {
             await sendLanguagePicker(env, chatId);
@@ -283,7 +299,7 @@ async function handleUpdate(update: any, env: Env, ctx: ExecutionContext, origin
     }
 
     const media = message.document || message.video || message.audio || message.voice || message.video_note || message.animation;
-    if (!media) return;
+    if (!media || !update.message) return; // edited_message: commands above still work, files are not stored again
 
     const lang = await getLang(env, userId, message.from?.language_code);
     const t = T[lang];
@@ -324,7 +340,10 @@ async function handleUpdate(update: any, env: Env, ctx: ExecutionContext, origin
         size: media.file_size,
     }));
 
-    const base = env.WORKER_URL ? new URL(env.WORKER_URL).origin : origin;
+    let base = origin;
+    if (env.WORKER_URL) {
+        try { base = new URL(env.WORKER_URL).origin; } catch { /* not a valid URL: use the address of this request */ }
+    }
     const directLink = `${base}/dl/${fileId}?name=${encodeURIComponent(fileName)}`;
 
     const size = humanSize(media.file_size);
