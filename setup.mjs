@@ -38,9 +38,11 @@ const API_ID = await ask("API_ID", "number from https://my.telegram.org");
 const API_HASH = await ask("API_HASH", "string from https://my.telegram.org");
 const BOT_TOKEN = await ask("BOT_TOKEN", "from @BotFather");
 const BIN_CHANNEL = await ask("BIN_CHANNEL", "private channel id like -100123456789, bot must be ADMIN there");
+const ADMIN_IDS = await ask("ADMIN_IDS", "optional: your numeric Telegram id(s) for the /admin panel, comma separated (ask @userinfobot). Press Enter to skip");
 rl.close();
 if (!API_ID || !API_HASH || !BOT_TOKEN || !BIN_CHANNEL) die("All four values are required.");
 if (!/^\d+$/.test(API_ID) || Number(API_ID) > 2147483647) die("API_ID must be the numeric App api_id from https://my.telegram.org (usually 7-8 digits). It is not the bot id or your Telegram user id.");
+if (ADMIN_IDS && !/^\d+([\s,;]+\d+)*$/.test(ADMIN_IDS)) die("ADMIN_IDS must be one or more numeric Telegram user ids separated by commas.");
 if (!/^[0-9a-f]{32}$/i.test(API_HASH)) die("API_HASH must be the 32-character hex string from https://my.telegram.org.");
 if (!/^-100\d+$/.test(BIN_CHANNEL)) die("BIN_CHANNEL must look like -100123456789 (note the -100 prefix).");
 
@@ -89,7 +91,7 @@ if (!workerUrl) die("Deployed, but could not detect the worker URL. Open /setup 
 
 // 5. Secrets -------------------------------------------------------------
 log("Uploading secrets...");
-for (const [k, v] of Object.entries({ API_ID, API_HASH, BOT_TOKEN, BIN_CHANNEL })) {
+for (const [k, v] of Object.entries({ API_ID, API_HASH, BOT_TOKEN, BIN_CHANNEL, ...(ADMIN_IDS ? { ADMIN_IDS } : {}) })) {
   const r = wr(["secret", "put", k], { input: v + "\n" });
   if (r.code !== 0) die(`Failed to set secret ${k}\n${r.out}`);
   console.log("  set " + k);

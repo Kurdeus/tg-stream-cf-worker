@@ -5,3 +5,6 @@ API_HASH=
 BOT_TOKEN=
 # Private channel id used as storage, like -100123456789 (the bot must be an ADMIN there)
 BIN_CHANNEL=
+# Your numeric Telegram user id (ask @userinfobot). Several ids can be separated by commas.
+# Needed for the /admin panel where helper bots are added. Leave empty to turn the panel off.
+ADMIN_IDS=

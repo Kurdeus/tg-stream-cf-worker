@@ -31,6 +31,9 @@
       },
       "BIN_CHANNEL": {
         "description": "ID of a PRIVATE Telegram channel used as file storage, like -100123456789. Add your bot to it as ADMIN first."
+      },
+      "ADMIN_IDS": {
+        "description": "Your numeric Telegram user id (ask [@userinfobot](https://t.me/userinfobot)), used to open the /admin panel and add helper bots. Several ids can be separated by commas. Leave empty to turn the panel off."
       }
     }
   },
