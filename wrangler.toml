@@ -16,6 +16,15 @@ enabled = true
 name = "STREAMER"
 class_name = "StreamerDO"
 
+# One global instance: connection limits, /admin statistics and bot cooldowns.
+[[durable_objects.bindings]]
+name = "GUARD"
+class_name = "GuardDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["StreamerDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["GuardDO"]
