@@ -10,6 +10,7 @@ export interface AdminStrings {
     btnAdd: string;
     btnList: string;
     btnCheck: string;
+    btnStats: string;
     btnMode: (mode: Mode) => string;
     btnBack: string;
     btnCancel: string;
@@ -31,7 +32,20 @@ export interface AdminStrings {
     checkFail: (label: string, reason: string) => string;
     cancelled: string;
     deniedAlert: string;
+    statsHeader: string;
+    statsUnavailable: string;
+    statsActive: (n: number) => string;
+    statsBytes: (size: string) => string;
+    statsCache: (hit: number, miss: number, percent: number | null) => string;
+    statsFloodHeader: string;
+    statsFloodLine: (label: string, count: number, agoSeconds: number) => string;
+    statsFloodNone: (label: string) => string;
 }
+
+const agoFa = (s: number) =>
+    s < 60 ? `${s} ثانیه پیش` : s < 3600 ? `${Math.floor(s / 60)} دقیقه پیش` : s < 86400 ? `${Math.floor(s / 3600)} ساعت پیش` : `${Math.floor(s / 86400)} روز پیش`;
+const agoEn = (s: number) =>
+    s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`;
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -45,6 +59,7 @@ export const A: Record<Lang, AdminStrings> = {
         btnAdd: "➕ افزودن ربات",
         btnList: "📋 ربات‌های کمکی",
         btnCheck: "🔄 بررسی دسترسی",
+        btnStats: "📊 آمار",
         btnMode: (m) => (m === "spread" ? "⚖️ حالت: پخش بار" : "⚖️ حالت: جایگزین"),
         btnBack: "⬅️ بازگشت",
         btnCancel: "✖️ لغو",
@@ -66,6 +81,16 @@ export const A: Record<Lang, AdminStrings> = {
         checkFail: (l, r) => `❌ ${l}: ${esc(r)}`,
         cancelled: "لغو شد.",
         deniedAlert: "⛔ دسترسی نداری",
+        statsHeader: "📊 <b>آمار</b>",
+        statsUnavailable: "آمار در دسترس نیست. مطمئن شو «GUARD» توی «wrangler.toml» هست و دوباره «deploy» کردی.",
+        statsActive: (n) => `اتصال‌های دانلود فعال: ${n}`,
+        statsBytes: (size) => `حجم ارسال‌شده: ${size}`,
+        statsCache: (hit, miss, p) => p === null
+            ? "نرخ «cache hit» (کش «access_hash» کانال): هنوز داده‌ای نیست"
+            : `نرخ «cache hit» (کش «access_hash» کانال): ${p}٪ (${hit} از ${hit + miss})`,
+        statsFloodHeader: "<b>«FLOOD_WAIT» هر ربات:</b>",
+        statsFloodLine: (label, count, ago) => `${label} · ${count} بار · آخرین بار ${agoFa(ago)}`,
+        statsFloodNone: (label) => `${label} · بدون «flood»`,
     },
     en: {
         denied: (id) => `⛔ Access denied.\nYour Telegram id: <code>${id}</code>\nIf you own this bot, add that id to ADMIN_IDS.`,
@@ -76,6 +101,7 @@ export const A: Record<Lang, AdminStrings> = {
         btnAdd: "➕ Add bot",
         btnList: "📋 Helper bots",
         btnCheck: "🔄 Check access",
+        btnStats: "📊 Stats",
         btnMode: (m) => (m === "spread" ? "⚖️ Mode: spread" : "⚖️ Mode: fallback"),
         btnBack: "⬅️ Back",
         btnCancel: "✖️ Cancel",
@@ -97,5 +123,15 @@ export const A: Record<Lang, AdminStrings> = {
         checkFail: (l, r) => `❌ ${l}: ${esc(r)}`,
         cancelled: "Cancelled.",
         deniedAlert: "⛔ Access denied",
+        statsHeader: "📊 <b>Stats</b>",
+        statsUnavailable: "Stats are not available. Make sure GUARD is in wrangler.toml and deploy again.",
+        statsActive: (n) => `Active download connections: ${n}`,
+        statsBytes: (size) => `Data sent: ${size}`,
+        statsCache: (hit, miss, p) => p === null
+            ? "Cache hit rate (channel access_hash cache): no data yet"
+            : `Cache hit rate (channel access_hash cache): ${p}% (${hit} of ${hit + miss})`,
+        statsFloodHeader: "<b>FLOOD_WAIT per bot:</b>",
+        statsFloodLine: (label, count, ago) => `${label} · ${count} time(s) · last ${agoEn(ago)}`,
+        statsFloodNone: (label) => `${label} · no flood`,
     },
 };

@@ -8,4 +8,5 @@ export interface Env {
     BIN_CHANNEL?: string;
     ADMIN_IDS?: string; // comma separated Telegram user ids allowed to open /admin
     STREAMER: DurableObjectNamespace;
+    GUARD: DurableObjectNamespace;
 }

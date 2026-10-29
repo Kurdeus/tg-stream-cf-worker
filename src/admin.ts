@@ -1,7 +1,8 @@
 import type { Env } from "./env";
 import { tg } from "./telegram";
-import type { Lang } from "./messages";
+import { humanSize, type Lang } from "./messages";
 import { A } from "./admin-messages";
+import { guardCall } from "./guard";
 import {
     getHelpers, saveHelpers, getCooldowns, getMode, setMode, botKey, sessionKey, clearCooldown, HelperBot,
 } from "./bots";
@@ -34,6 +35,7 @@ async function panelView(env: Env, lang: Lang): Promise<View> {
             inline_keyboard: [
                 [{ text: a.btnAdd, callback_data: "adm:add" }, { text: a.btnList, callback_data: "adm:list" }],
                 [{ text: a.btnCheck, callback_data: "adm:check" }, { text: a.btnMode(mode), callback_data: "adm:mode" }],
+                [{ text: a.btnStats, callback_data: "adm:stats" }],
             ],
         },
     };
@@ -76,6 +78,38 @@ async function checkView(env: Env, lang: Lang): Promise<View> {
     return {
         text: `${a.checkHeader}\n\n${lines.join("\n")}`,
         reply_markup: { inline_keyboard: [[{ text: a.btnBack, callback_data: "adm:menu" }]] },
+    };
+}
+
+async function statsView(env: Env, lang: Lang): Promise<View> {
+    const a = A[lang];
+    const back = { inline_keyboard: [[{ text: a.btnBack, callback_data: "adm:menu" }]] };
+    const [s, helpers, me] = await Promise.all([guardCall(env, "stats"), getHelpers(env), tg(env, "getMe")]);
+    if (!s) return { text: `${a.statsHeader}\n\n${a.statsUnavailable}`, reply_markup: back };
+
+    const lookups = s.hit + s.miss;
+    const percent = lookups ? Math.round((s.hit * 1000) / lookups) / 10 : null;
+    const bots = [
+        { key: botKey(env.BOT_TOKEN), label: `@${me?.result?.username ?? "main"} (main)` },
+        ...helpers.map(h => ({ key: String(h.id), label: `@${h.username}` })),
+    ];
+    const now = Date.now();
+    const floods = bots.map(b => {
+        const f = s.floods?.[b.key];
+        return f ? a.statsFloodLine(b.label, f.count, Math.max(0, Math.round((now - f.last) / 1000))) : a.statsFloodNone(b.label);
+    });
+    return {
+        text: [
+            a.statsHeader,
+            "",
+            a.statsActive(s.active),
+            a.statsBytes(humanSize(s.bytes) || "0 B"),
+            a.statsCache(s.hit, s.miss, percent),
+            "",
+            a.statsFloodHeader,
+            ...floods,
+        ].join("\n"),
+        reply_markup: back,
     };
 }
 
@@ -195,6 +229,9 @@ export async function handleAdminCallback(env: Env, cq: any, lang: Lang): Promis
     } else if (data === "adm:check") {
         await ack();
         await edit(env, chatId, messageId, await checkView(env, lang));
+    } else if (data === "adm:stats") {
+        await ack();
+        await edit(env, chatId, messageId, await statsView(env, lang));
     } else if (data === "adm:mode") {
         await setMode(env, (await getMode(env)) === "spread" ? "fallback" : "spread");
         await ack();

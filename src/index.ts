@@ -5,6 +5,7 @@ import { adminIds, isAdmin, isAwaitingToken, handleAdminCommand, handleAdminCall
 import { getHelpers } from "./bots";
 
 export type { Env };
+export { GuardDO } from "./guard";
 import { T, Lang, PICK_LANGUAGE_TEXT, langKeyboard, changeLangKeyboard, langFromCode, humanSize, escapeHtml } from "./messages";
 
 async function sha256Hex(text: string): Promise<string> {

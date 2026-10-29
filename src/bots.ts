@@ -1,4 +1,5 @@
 import type { Env } from "./env";
+import { guardCall } from "./guard";
 
 /**
  * Helper bots are extra bot accounts used ONLY to read files from the storage channel when the
@@ -17,7 +18,6 @@ export interface Candidate {
 export type Mode = "fallback" | "spread";
 
 const HELPERS_KEY = "bots:helpers";
-const COOLDOWN_KEY = "bots:cooldown";
 const MODE_KEY = "bots:mode";
 
 export const botKey = (token: string) => token.split(":")[0];
@@ -47,29 +47,23 @@ export async function setMode(env: Env, mode: Mode): Promise<void> {
     await env.SESSIONS.put(MODE_KEY, mode);
 }
 
-/** Map of bot id -> epoch ms until which the bot should be avoided. Expired entries are dropped. */
+/**
+ * Map of bot id -> epoch ms until which the bot should be avoided. Expired entries are dropped.
+ * The map lives in the guard Durable Object, which applies every change one at a time.
+ */
 export async function getCooldowns(env: Env, now = Date.now()): Promise<Record<string, number>> {
-    try {
-        const raw = await env.SESSIONS.get(COOLDOWN_KEY);
-        const map = raw ? JSON.parse(raw) : {};
-        const out: Record<string, number> = {};
-        for (const [k, v] of Object.entries(map)) if (typeof v === "number" && v > now) out[k] = v;
-        return out;
-    } catch {
-        return {};
-    }
+    const r = await guardCall(env, "cooldown.get");
+    const out: Record<string, number> = {};
+    if (r?.map && typeof r.map === "object") for (const [k, v] of Object.entries(r.map)) if (typeof v === "number" && v > now) out[k] = v;
+    return out;
 }
 
 export async function setCooldown(env: Env, key: string, untilMs: number): Promise<void> {
-    const map = await getCooldowns(env);
-    map[key] = Math.max(untilMs, map[key] ?? 0);
-    await env.SESSIONS.put(COOLDOWN_KEY, JSON.stringify(map));
+    await guardCall(env, "cooldown.set", { key, until: untilMs });
 }
 
 export async function clearCooldown(env: Env, key: string): Promise<void> {
-    const map = await getCooldowns(env);
-    delete map[key];
-    await env.SESSIONS.put(COOLDOWN_KEY, JSON.stringify(map));
+    await guardCall(env, "cooldown.clear", { key });
 }
 
 /**
