@@ -325,6 +325,7 @@ export async function handleStream(request: Request, env: any): Promise<Response
         const MAX_RETRIES = Math.max(6, cands.length * 2);
         let needReconnect = false;
         let nextStart = idx;
+        let cancelled = false; // the downloader hung up; nothing more may be read, retried or enqueued
 
         // Pull-based stream: Telegram is only read as fast as the client consumes it.
         // If Telegram stalls, rate-limits us or drops the socket, we move to the next bot
@@ -332,9 +333,11 @@ export async function handleStream(request: Request, env: any): Promise<Response
         const stream = new ReadableStream({
             async pull(controller) {
                 while (true) {
+                    if (cancelled) return;
                     try {
                         if (needReconnect) {
                             const r = await acquire(env, cands, nextStart, cid, mid);
+                            if (cancelled) { await closeClient(r.client); return; }
                             client = r.client;
                             doc = r.doc;
                             idx = r.idx;
@@ -344,6 +347,7 @@ export async function handleStream(request: Request, env: any): Promise<Response
                         }
 
                         const { value, done } = await iterator.next();
+                        if (cancelled) return; // cancel() already closed the connection; enqueue would throw
                         if (done) {
                             if (sent < contentLength) throw new Error(`Telegram ended early at ${sent}/${contentLength} bytes`);
                             console.log(`[dl ${rid}] complete sent=${sent}`);
@@ -372,6 +376,7 @@ export async function handleStream(request: Request, env: any): Promise<Response
                         attempts = 0; // progress made, so reset the retry budget
                         return;
                     } catch (e: any) {
+                        if (cancelled) return; // an error caused by our own cancel(), not by Telegram: do not retry
                         const f = classifyError(e);
                         const msg = `${new Date().toISOString()} offset=${start + sent} sent=${sent}/${contentLength} bot=${cands[idx].label} kind=${f.kind} retry=${attempts}/${MAX_RETRIES} :: ${e?.message ?? e}`;
                         console.log(`[dl ${rid}] ERROR ${msg}`);
@@ -400,6 +405,7 @@ export async function handleStream(request: Request, env: any): Promise<Response
             },
             async cancel() {
                 // Runs when the DOWNLOADER (ADM / network / VPN) closed the connection, not the worker.
+                cancelled = true;
                 console.log(`[dl ${rid}] CLIENT CLOSED connection at byte ${start + sent} (sent ${sent}/${contentLength})`);
                 try { await iterator.return?.(); } catch { }
                 await closeClient(client);
