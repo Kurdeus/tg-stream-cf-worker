@@ -42,7 +42,7 @@ You need four values, plus an optional fifth. Collect them first and the setup t
 ### Option 1: the button (no terminal)
 
 1. Click **Deploy to Cloudflare** at the top of this page and sign in.
-2. Paste the four values into the form. The KV namespace and the Durable Object are created for you.
+2. Paste the four values into the form. The KV namespace and the two Durable Objects are created for you.
 3. When the deploy is finished, open your worker address once, for example `https://tg-stream.your-account.workers.dev/`. This registers the Telegram webhook.
 4. Message your bot and send `/start`.
 
@@ -108,6 +108,8 @@ The panel can add bots, list them (with a remove button for each), check that ev
 - **Fallback** (default): the main bot is always tried first, helpers only step in when something fails.
 - **Spread**: every download starts on a random ready bot, so parallel connections are shared between accounts.
 
+The **Stats** button shows the number of active download connections, the total data sent, the cache hit rate (the cache of the storage channel's `access_hash`, which is the only cache the worker has) and how many times each bot hit `FLOOD_WAIT`. These numbers are kept by the `GuardDO` Durable Object.
+
 `/addbot <token>` does the same as the button. A bot that was rate limited is skipped for the length of its wait, one with a revoked token or no channel access for ten minutes.
 
 Good to know:
@@ -125,6 +127,8 @@ Good to know:
 | The bot says nothing at all | The webhook is not registered. Open `/setup`. |
 | `Worker exceeded CPU time limit` | A plain Worker request has a very small CPU budget. Make sure the `STREAMER` Durable Object block from `wrangler.toml` is present in your deployed version. |
 | A download stops and resumes again and again | Check the `[dl ...]` lines in the worker's live logs: `CLIENT CLOSED` means the downloader or network dropped, `ERROR` means Telegram did. |
+| `429 Too many connections` | The downloader opened more than 16 connections from one IP address, or more than 32 for one file. Lower the number of connections in the download manager, or change `MAX_CONN_PER_IP` and `MAX_CONN_PER_FILE` at the top of `src/guard.ts`. |
+| `/admin` says stats are not available | The `GUARD` Durable Object block and its migration from `wrangler.toml` are missing in the deployed version. Deploy again with the current `wrangler.toml`. Downloads still work without it, but the connection limits, the stats and the bot cooldowns are off. |
 | `Cannot provision a KV Namespace ... already exists` | A KV namespace with that name is already in your account, usually left over from an earlier attempt. Delete it in the dashboard (Storage & Databases, then KV), or type a different name in the Deploy form. |
 | `The value of "value" is out of range` or `API_ID is invalid` | The `API_ID` secret is wrong. The number is too big for Telegram's 32-bit field, so it is probably your bot's id or your own user id. Use the App api_id from [my.telegram.org](https://my.telegram.org), set the secret again (Settings, then Variables and Secrets) and open `/setup`: it checks `API_ID` and `API_HASH` for you. |
 | The language buttons do nothing | Telegram is not delivering button presses to the worker. Open `/setup`: it re-registers the webhook with button support. |
@@ -136,14 +140,16 @@ Good to know:
 
 - `src/index.ts` receives Telegram updates, registers the webhook, copies each file into the storage channel and builds the link.
 - `src/messages.ts` holds every text the bot sends, in Persian and English. Edit it to change the wording, or add an entry to `T` (and a button in `langKeyboard`) to support another language. Each person's choice is stored in KV under `lang:<user id>`.
-- `src/bots.ts` keeps the list of helper bots, their cooldowns, the mode and the error classification. `src/admin.ts` and `src/admin-messages.ts` are the `/admin` panel.
-- `src/streamer.ts` opens its own MTProto connection for every download request, reads the stored message, and streams it with support for `Range` requests. If Telegram stalls, it reconnects and continues from the exact byte.
+- `src/bots.ts` keeps the list of helper bots, the mode and the error classification; the cooldowns are stored by `GuardDO`. `src/admin.ts` and `src/admin-messages.ts` are the `/admin` panel.
+- `src/streamer.ts` opens its own MTProto connection for every download request, reads the stored message, and streams it with support for `Range` and `If-Range` requests. It sends an `ETag` and a `Last-Modified` header so that download managers can resume safely. A malformed `Range` header is ignored (the whole file is sent) and a range past the end of the file gets `416`. If Telegram stalls, it reconnects and continues from the exact byte. If the downloader hangs up, the worker stops at once and does not retry.
 - The streaming itself runs inside a SQLite-backed Durable Object, so the heavy decryption does not count against the small CPU budget of a normal Worker request.
+- `src/guard.ts` is a second Durable Object (`GuardDO`, one global instance). It limits the connections (16 per IP address and 32 per file, anything above that gets `429`), counts the bytes sent, the flood events and the cache hits for the Stats screen, and keeps the bot cooldowns so that two requests cannot overwrite each other.
 
 ## Limits worth knowing
 
 - `/setup` is open to anyone who knows your worker address. It never prints your token and changes nothing when everything is already set up, but you may still want to remove the route once everything works.
 - Free Cloudflare plans have daily request quotas. A busy public bot can use them up.
+- `GuardDO` adds roughly three Durable Object requests (and as many storage writes) per download connection, plus one every 30 seconds while a download runs. On the free plan this stays well below the daily Durable Object request quota, but the running time of the streaming Durable Object can run out sooner. Check Cloudflare's current limits.
 - This project depends on a third-party MTProto library and on Cloudflare's current limits, both of which change over time.
 
 ## License
@@ -192,7 +198,7 @@ you ──file──▶ bot ──copy──▶ private channel (storage)
 ### ‏روش اول: دکمه (بدون ترمینال)
 
 1. ‏روی دکمه‌ی «⁦Deploy to Cloudflare⁩» بالای همین صفحه بزنید و وارد حساب شوید.
-2. ‏چهار مقدار بالا را در فرم وارد کنید. «⁦KV⁩» و «⁦Durable Object⁩» خودکار ساخته می‌شوند.
+2. ‏چهار مقدار بالا را در فرم وارد کنید. «⁦KV⁩» و دو «⁦Durable Object⁩» خودکار ساخته می‌شوند.
 3. ‏بعد از پایان «⁦deploy⁩»، آدرس ورکر را یک بار باز کنید، مثلاً ⁦`https://tg-stream.your-account.workers.dev/`⁩. با همین کار «⁦webhook⁩» تلگرام ثبت می‌شود.
 4. ‏به ربات پیام بدهید و ⁦`/start`⁩ را بفرستید.
 
@@ -258,6 +264,8 @@ npx wrangler secret put ADMIN_IDS   # optional
 - ‏**جایگزین** (پیش‌فرض): همیشه اول ربات اصلی امتحان می‌شود و ربات‌های کمکی فقط وقتی چیزی خراب شد وارد می‌شوند.
 - ‏**پخش بار:** هر دانلود از یک ربات آماده‌ی تصادفی شروع می‌شود، تا اتصال‌های هم‌زمان بین حساب‌ها پخش شوند.
 
+‏دکمه‌ی **آمار** تعداد اتصال‌های دانلود فعال، حجم کل ارسال‌شده، نرخ «⁦cache hit⁩» (کش «⁦access_hash⁩» کانال ذخیره‌سازی، که تنها کشی است که ورکر دارد) و تعداد دفعه‌هایی را که هر ربات «⁦FLOOD_WAIT⁩» گرفته نشان می‌دهد. این اعداد را «⁦GuardDO⁩» نگه می‌دارد.
+
 ‏⁦`/addbot <token>`⁩ همان کار دکمه را می‌کند. رباتی که به محدودیت سرعت خورده باشد به اندازه‌ی مدت انتظارش کنار گذاشته می‌شود، و رباتی که توکنش باطل شده یا دسترسی کانال را از دست داده ده دقیقه.
 
 ‏نکته‌ها:
@@ -275,6 +283,8 @@ npx wrangler secret put ADMIN_IDS   # optional
 | ‏ربات هیچ جوابی نمی‌دهد | ‏«⁦webhook⁩» ثبت نشده. ⁦`/setup`⁩ را باز کنید. |
 | ⁦`Worker exceeded CPU time limit`⁩ | ‏سهم ⁦CPU⁩ یک درخواست معمولی ورکر خیلی کم است. مطمئن شوید بلوک «⁦Durable Object⁩» با نام ⁦`STREAMER`⁩ از «⁦wrangler.toml⁩» در نسخه‌ی «⁦deploy⁩» شده‌ی شما هست. |
 | ‏دانلود مدام قطع و وصل می‌شود | ‏خط‌های ⁦`[dl ...]`⁩ را در لاگ زنده‌ی ورکر نگاه کنید. ⁦`CLIENT CLOSED`⁩ یعنی دانلودر یا شبکه قطع کرده، و ⁦`ERROR`⁩ یعنی تلگرام. |
+| ⁦`429 Too many connections`⁩ | ‏دانلودر بیشتر از ۱۶ اتصال از یک «⁦IP⁩» یا بیشتر از ۳۲ اتصال برای یک فایل باز کرده. تعداد اتصال را در مدیر دانلود کم کنید، یا ⁦`MAX_CONN_PER_IP`⁩ و ⁦`MAX_CONN_PER_FILE`⁩ را بالای ⁦`src/guard.ts`⁩ عوض کنید. |
+| ‏⁦`/admin`⁩ می‌گوید آمار در دسترس نیست | ‏بلوک «⁦GUARD⁩» و «⁦migration⁩» آن از ⁦`wrangler.toml`⁩ در نسخه‌ی «⁦deploy⁩» شده‌ی شما نیست. دوباره با ⁦`wrangler.toml`⁩ فعلی «⁦deploy⁩» کنید. بدون آن دانلود کار می‌کند، ولی محدودیت اتصال، آمار و زمان استراحت ربات‌ها خاموش است. |
 | ⁦`Cannot provision a KV Namespace ... already exists`⁩ | ‏یک «⁦KV⁩» با همین اسم از قبل توی حساب شما هست، معمولاً از تلاش قبلی باقی مانده. آن را از داشبورد پاک کنید (بخش «⁦Storage & Databases⁩» و بعد «⁦KV⁩») یا توی فرم «⁦Deploy⁩» اسم دیگری بنویسید. |
 | ‏⁦`The value of "value" is out of range`⁩ یا ⁦`API_ID is invalid`⁩ | ‏«⁦secret⁩» با نام ⁦`API_ID`⁩ اشتباه است. این عدد برای فیلد ۳۲ بیتی تلگرام بزرگ‌تر است، پس احتمالاً شناسه‌ی خود ربات یا شناسه‌ی کاربری شماست. «⁦App api_id⁩» را از [⁦my.telegram.org⁩](https://my.telegram.org) بردارید، «⁦secret⁩» را دوباره تنظیم کنید (بخش «⁦Settings⁩» و بعد «⁦Variables and Secrets⁩») و ⁦`/setup`⁩ را باز کنید: ⁦`API_ID`⁩ و ⁦`API_HASH`⁩ را برایتان چک می‌کند. |
 | ‏دکمه‌های زبان کار نمی‌کنند | ‏تلگرام فشرده شدن دکمه‌ها را به ورکر نمی‌رساند. ⁦`/setup`⁩ را باز کنید: «⁦webhook⁩» را با پشتیبانی از دکمه دوباره ثبت می‌کند. |
@@ -286,14 +296,16 @@ npx wrangler secret put ADMIN_IDS   # optional
 
 - ‏⁦`src/index.ts`⁩ پیام‌های تلگرام را می‌گیرد، «⁦webhook⁩» را ثبت می‌کند، هر فایل را به کانال ذخیره‌سازی کپی می‌کند و لینک را می‌سازد.
 - ‏⁦`src/messages.ts`⁩ همه‌ی متن‌هایی را که ربات می‌فرستد، به فارسی و انگلیسی، نگه می‌دارد. برای عوض کردن جمله‌ها همین فایل را ویرایش کنید. برای افزودن زبان تازه یک ورودی به ⁦`T`⁩ و یک دکمه در ⁦`langKeyboard`⁩ اضافه کنید. انتخاب هر کاربر در «⁦KV⁩» با کلید ⁦`lang:<user id>`⁩ ذخیره می‌شود.
-- ‏⁦`src/bots.ts`⁩ فهرست ربات‌های کمکی، زمان استراحتشان، حالت کار و دسته‌بندی خطاها را نگه می‌دارد. ⁦`src/admin.ts`⁩ و ⁦`src/admin-messages.ts`⁩ پنل ⁦`/admin`⁩ هستند.
-- ‏⁦`src/streamer.ts`⁩ برای هر درخواست دانلود یک اتصال «⁦MTProto⁩» جدا باز می‌کند، پیام ذخیره‌شده را می‌خواند و با پشتیبانی از «⁦Range⁩» پخش می‌کند. اگر تلگرام گیر کند، دوباره وصل می‌شود و از همان بایت ادامه می‌دهد.
+- ‏⁦`src/bots.ts`⁩ فهرست ربات‌های کمکی، حالت کار و دسته‌بندی خطاها را نگه می‌دارد؛ زمان استراحت ربات‌ها را «⁦GuardDO⁩» نگه می‌دارد. ⁦`src/admin.ts`⁩ و ⁦`src/admin-messages.ts`⁩ پنل ⁦`/admin`⁩ هستند.
+- ‏⁦`src/streamer.ts`⁩ برای هر درخواست دانلود یک اتصال «⁦MTProto⁩» جدا باز می‌کند، پیام ذخیره‌شده را می‌خواند و با پشتیبانی از درخواست‌های «⁦Range⁩» و «⁦If-Range⁩» پخش می‌کند. ⁦`ETag`⁩ و ⁦`Last-Modified`⁩ هم می‌فرستد تا مدیرهای دانلود با اطمینان ادامه بدهند. هدر «⁦Range⁩» خراب نادیده گرفته می‌شود (کل فایل فرستاده می‌شود) و بازه‌ای بیرون از فایل ⁦`416`⁩ می‌گیرد. اگر تلگرام گیر کند، دوباره وصل می‌شود و از همان بایت ادامه می‌دهد. اگر دانلودر قطع کند، ورکر فوراً می‌ایستد و تلاش دوباره نمی‌کند.
 - ‏خودِ پخش داخل یک «⁦Durable Object⁩» با ذخیره‌ساز «⁦SQLite⁩» اجرا می‌شود، تا رمزگشایی سنگین از سهم کوچک ⁦CPU⁩ یک درخواست معمولی ورکر کم نشود.
+- ‏⁦`src/guard.ts`⁩ یک «⁦Durable Object⁩» دوم («⁦GuardDO⁩»، یک نمونه‌ی سراسری) است. تعداد اتصال را محدود می‌کند (۱۶ برای هر «⁦IP⁩» و ۳۲ برای هر فایل؛ بیشتر از آن ⁦`429`⁩ می‌گیرد)، بایت‌های ارسالی، رویدادهای «⁦flood⁩» و «⁦cache hit⁩»ها را برای صفحه‌ی آمار می‌شمارد و زمان استراحت ربات‌ها را نگه می‌دارد تا دو درخواست هم را بازنویسی نکنند.
 
 ## ‏نکاتی که باید بدانید
 
 - ‏آدرس ⁦`/setup`⁩ برای هر کسی که آدرس ورکرتان را بداند بازه. توکن را نشان نمی‌دهد و وقتی همه‌چیز راه افتاده باشد چیزی را تغییر نمی‌دهد، ولی بعد از راه افتادن همه‌چیز باز هم شاید بخواهید این مسیر را حذف کنید.
 - ‏پلن رایگان «⁦Cloudflare⁩» سهمیه‌ی روزانه‌ی درخواست دارد و یک ربات عمومی پرمراجعه می‌تواند آن را تمام کند.
+- ‏«⁦GuardDO⁩» به ازای هر اتصال دانلود تقریباً سه درخواست «⁦Durable Object⁩» (و همین‌قدر نوشتن در ذخیره‌ساز) اضافه می‌کند، و در حین دانلود هر ۳۰ ثانیه یکی دیگر. در پلن رایگان این عدد خیلی کمتر از سهمیه‌ی روزانه‌ی درخواست «⁦Durable Object⁩» می‌ماند، ولی مدت اجرای «⁦Durable Object⁩» پخش ممکن است زودتر تمام شود. سقف‌های فعلی «⁦Cloudflare⁩» را چک کنید.
 - ‏این پروژه به یک کتابخانه‌ی «⁦MTProto⁩» از یک نویسنده‌ی دیگر و به محدودیت‌های فعلی «⁦Cloudflare⁩» وابسته است و هر دو ممکن است عوض شوند.
 
 ## ‏مجوز
