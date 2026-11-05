@@ -1,7 +1,14 @@
 <div align="center">
 
-# tg-stream-cf-worker
+<h1>Telegram Stream Bot</h1>
+  <img src="https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" alt="Node.js" />
+  <img src="https://img.shields.io/badge/Cloudflare_Workers-F38020?style=for-the-badge&logo=cloudflareworkers&logoColor=white" alt="Cloudflare Workers" />
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/MTProto-26A5E4?style=for-the-badge&logo=telegram&logoColor=white" alt="MTProto" />
+</div>
 
+
+## 🚀 Overview
 **Turn any file you send to a Telegram bot into a direct, resumable download link, served from a Cloudflare Worker.**
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Kurdeus/tg-stream-cf-worker)
