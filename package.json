@@ -18,13 +18,6 @@
     "wrangler": "^4.152.0"
   },
   "type": "module",
-  "cloudflare": {
-    "bindings": {
-      "GIST_URL": {
-        "description": "Raw URL of a .dev.vars style file (API_ID, API_HASH, BOT_TOKEN, BIN_CHANNEL, ADMIN_IDS, MIRROR_BOT_TOKEN_1..n). Example: https://gist.githubusercontent.com/USER/GIST_ID/raw/.dev.vars"
-      }
-    }
-  },
   "private": true,
   "license": "MIT",
   "repository": {
