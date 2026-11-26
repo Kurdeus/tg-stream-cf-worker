@@ -262,6 +262,9 @@ async function acquire(env: any, cands: Candidate[], startIdx: number, cid: stri
     throw err;
 }
 
+/** Content types that Cloudflare may compress on the fly. */
+const COMPRESSIBLE = /^(text\/|application\/(json|xml|javascript|x-javascript|xhtml\+xml|rss\+xml|atom\+xml|wasm)|image\/svg\+xml)/i;
+
 export async function handleStream(request: Request, env: any): Promise<Response> {
     const url = new URL(request.url);
     const fileId = url.pathname.split("/").pop();
@@ -319,11 +322,12 @@ export async function handleStream(request: Request, env: any): Promise<Response
             "Content-Type": doc.mimeType || "application/octet-stream",
             "Accept-Ranges": "bytes",
             "Content-Length": String(contentLength),
-            // The body must reach the downloader byte for byte. "no-transform" and an explicit identity encoding stop
-            // Cloudflare from compressing it on the fly: IDM sends "Accept-Encoding: gzip", and a compressed answer to
-            // a Range request gives segments that do not fit together (a damaged file).
+            // The body must reach the downloader byte for byte. "no-transform" asks Cloudflare not to touch it.
+            // Types that Cloudflare compresses on the fly (text, JSON...) also get an explicit identity encoding:
+            // IDM sends "Accept-Encoding: gzip", and compressed pieces of a Range request do not fit together.
+            // It is NOT sent for other files, because a browser hides the total size when Content-Encoding is present.
             "Cache-Control": "private, no-transform",
-            "Content-Encoding": "identity",
+            ...(COMPRESSIBLE.test(doc.mimeType || "") ? { "Content-Encoding": "identity" } : {}),
             "ETag": etag,
             ...(lastModified ? { "Last-Modified": lastModified } : {}),
             "Access-Control-Allow-Origin": "*",
