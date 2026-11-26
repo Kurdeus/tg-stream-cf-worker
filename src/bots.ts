@@ -114,7 +114,7 @@ export function classifyError(e: any): Failure {
     if (flood) return { kind: "flood", seconds: Number(flood[1]) };
     if (e?.errorMessage === "FLOOD" && Number.isFinite(e?.seconds)) return { kind: "flood", seconds: Number(e.seconds) };
 
-    if (/AUTH_KEY_(UNREGISTERED|DUPLICATED|INVALID)|SESSION_(REVOKED|EXPIRED)|USER_DEACTIVATED/i.test(text)) return { kind: "session" };
+    if (/AUTH_KEY_(UNREGISTERED|DUPLICATED|INVALID)|SESSION_(REVOKED|EXPIRED)|USER_DEACTIVATED|CONNECTION_NOT_INITED/i.test(text)) return { kind: "session" };
     if (/ACCESS_TOKEN_(INVALID|EXPIRED)|CHANNEL_(INVALID|PRIVATE)|CHAT_(ADMIN_REQUIRED|FORBIDDEN|WRITE_FORBIDDEN)|BOT_METHOD_INVALID|Bot cannot access BIN_CHANNEL/i.test(text)) return { kind: "access" };
 
     return { kind: "other" };
