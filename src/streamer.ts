@@ -24,6 +24,9 @@ function toBuffer(data: any): Buffer {
  * another one, so a shared global client breaks as soon as the downloader reconnects.
  * The login session is kept in KV, so a new connection costs only a short handshake.
  */
+/** The login string each bot account used last, so a failure only wipes the login that really failed. */
+const usedSessions = new Map<string, string>();
+
 async function newClient(env: any, token: string): Promise<TelegramClient> {
     // A wrong API_ID otherwise surfaces as a cryptic 32-bit "out of range" error deep inside GramJS.
     const apiId = Number(env.API_ID);
@@ -35,7 +38,22 @@ async function newClient(env: any, token: string): Promise<TelegramClient> {
         );
     }
     const key = sessionKey(token);
-    const savedSession = await env.SESSIONS.get(key);
+    let savedSession: string | null = await env.SESSIONS.get(key);
+
+    // Download managers such as IDM open 8-16 connections at the same moment. If the saved login is missing
+    // or was just revoked, all of them used to log in again at once, which Telegram punishes with
+    // FLOOD_WAIT and AUTH_KEY_DUPLICATED. Now ONE connection logs in; the others wait for its session.
+    let weLogIn = false;
+    if (!savedSession) {
+        for (let i = 0; i < 40; i++) {
+            const g = await guardCall(env, "login", { key });
+            if (!g || g.ok) { weLogIn = !!g; break; }      // guard unreachable: just log in; ok: we hold the lock
+            if (g.session) { savedSession = g.session; break; }
+            await sleep(400);
+        }
+        if (!savedSession) savedSession = await env.SESSIONS.get(key);
+    }
+    usedSessions.set(key, savedSession || "");
 
     const client = new TelegramClient(new StringSession(savedSession || ""), apiId, env.API_HASH, {
         connectionRetries: 5,
@@ -46,11 +64,21 @@ async function newClient(env: any, token: string): Promise<TelegramClient> {
     } as any);
 
     client.setLogLevel("none" as any);
-    if (savedSession) {
-        await client.connect();
-    } else {
-        await client.start({ botAuthToken: token });
-        await env.SESSIONS.put(key, (client.session as StringSession).save());
+    try {
+        if (savedSession) {
+            await client.connect();
+        } else {
+            await client.start({ botAuthToken: token });
+            const fresh = (client.session as StringSession).save();
+            await env.SESSIONS.put(key, fresh);
+            usedSessions.set(key, fresh);
+            if (weLogIn) await guardCall(env, "login.done", { key, session: fresh });
+            weLogIn = false;
+        }
+    } catch (e) {
+        if (weLogIn) await guardCall(env, "login.done", { key }); // release the lock, nothing to hand over
+        try { await client.disconnect(); } catch { }
+        throw e;
     }
     return client;
 }
@@ -113,7 +141,15 @@ async function getBinMessages(client: TelegramClient, botId: string, cid: string
 /** Remember that a bot should be avoided for a while (and drop its login if that is what broke). */
 async function recordFailure(env: any, cand: Candidate, f: Failure): Promise<void> {
     try {
-        if (f.kind === "session") await env.SESSIONS.delete(sessionKey(cand.token));
+        if (f.kind === "session") {
+            // Another connection may already have logged in again; do not throw its fresh login away.
+            const k = sessionKey(cand.token);
+            const failed = usedSessions.get(k);
+            if (failed === undefined || (await env.SESSIONS.get(k)) === failed) {
+                await env.SESSIONS.delete(k);
+                await guardCall(env, "login.forget", { key: k, session: failed ?? "" });
+            }
+        }
         const ms = cooldownFor(f);
         if (ms > 0) await setCooldown(env, cand.key, Date.now() + ms);
         if (f.kind === "flood") await guardCall(env, "flood", { key: cand.key, seconds: f.seconds });
@@ -283,7 +319,11 @@ export async function handleStream(request: Request, env: any): Promise<Response
             "Content-Type": doc.mimeType || "application/octet-stream",
             "Accept-Ranges": "bytes",
             "Content-Length": String(contentLength),
-            "Cache-Control": "public, max-age=3600",
+            // The body must reach the downloader byte for byte. "no-transform" and an explicit identity encoding stop
+            // Cloudflare from compressing it on the fly: IDM sends "Accept-Encoding: gzip", and a compressed answer to
+            // a Range request gives segments that do not fit together (a damaged file).
+            "Cache-Control": "private, no-transform",
+            "Content-Encoding": "identity",
             "ETag": etag,
             ...(lastModified ? { "Last-Modified": lastModified } : {}),
             "Access-Control-Allow-Origin": "*",
@@ -304,20 +344,29 @@ export async function handleStream(request: Request, env: any): Promise<Response
         console.log(`[dl ${rid}] start range=${rangeHeader ?? "none"} bytes=${start}-${end}/${totalSize} bot=${cands[idx].label} bots=${cands.length}`);
         const REQ = 512 * 1024; // bigger requests = fewer round-trips = less CPU per MB
 
-        const makeIterator = (fromByte: number) => client!.iterDownload({
-            file: new Api.InputDocumentFileLocation({
-                id: bigInt(doc.id) as any,
-                accessHash: bigInt(doc.accessHash) as any,
-                fileReference: toBuffer(doc.fileReference) as any,
-                thumbSize: ""
-            }),
-            dcId: doc.dcId,
-            offset: bigInt(fromByte) as any,
-            // "limit" is a number of CHUNKS (the old code passed bytes here)
-            limit: Math.ceil((end - fromByte + 1 + (fromByte % REQ)) / REQ) + 1,
-            requestSize: REQ,
-            chunkSize: REQ,
-        } as any)[Symbol.asyncIterator]();
+        // Telegram serves a file in blocks of REQ bytes that start at multiples of REQ. A downloader that asks for
+        // "bytes=1000000-" (IDM does this for every segment) starts in the middle of a block. GramJS then
+        // fetches TWO blocks for every chunk it returns, which doubles the load on Telegram and brings FLOOD_WAIT
+        // sooner. So we always start on a block boundary ourselves and throw away the first `toSkip` bytes.
+        let toSkip = 0;
+        const makeIterator = (fromByte: number) => {
+            const alignedStart = Math.floor(fromByte / REQ) * REQ;
+            toSkip = fromByte - alignedStart;
+            return client!.iterDownload({
+                file: new Api.InputDocumentFileLocation({
+                    id: bigInt(doc.id) as any,
+                    accessHash: bigInt(doc.accessHash) as any,
+                    fileReference: toBuffer(doc.fileReference) as any,
+                    thumbSize: ""
+                }),
+                dcId: doc.dcId,
+                offset: bigInt(alignedStart) as any,
+                // "limit" is a number of CHUNKS, not bytes
+                limit: Math.ceil((end - fromByte + 1 + toSkip) / REQ) + 1,
+                requestSize: REQ,
+                chunkSize: REQ,
+            } as any)[Symbol.asyncIterator]();
+        };
 
         let iterator = makeIterator(start);
         let sent = 0;
@@ -357,6 +406,11 @@ export async function handleStream(request: Request, env: any): Promise<Response
                             return;
                         }
                         let chunk = new Uint8Array(value as any);
+                        if (toSkip > 0) { // the first block starts before the byte the downloader asked for
+                            if (chunk.length <= toSkip) { toSkip -= chunk.length; continue; }
+                            chunk = chunk.subarray(toSkip);
+                            toSkip = 0;
+                        }
                         const remaining = contentLength - sent;
                         if (chunk.length >= remaining) {
                             chunk = chunk.subarray(0, remaining);

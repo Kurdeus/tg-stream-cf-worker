@@ -44,6 +44,9 @@ export class GuardDO {
     private released = new Map<string, number>(); // finished connections, so a late heartbeat cannot revive them
     private stats: Stats = { bytes: 0, hit: 0, miss: 0, floods: {} };
     private cooldowns: Record<string, number> = {};
+    // Login hand-off (memory only, it lives a few seconds): one connection logs a bot in, the rest wait for its session.
+    private loginLock = new Map<string, number>();
+    private loginFresh = new Map<string, { session: string; exp: number }>();
 
     constructor(private state: DurableObjectState, _env: unknown) {
         state.blockConcurrencyWhile(async () => {
@@ -58,6 +61,8 @@ export class GuardDO {
         for (const [id, l] of this.leases) if (l.exp <= now) this.leases.delete(id);
         for (const [id, exp] of this.released) if (exp <= now) this.released.delete(id);
         for (const [k, until] of Object.entries(this.cooldowns)) if (until <= now) delete this.cooldowns[k];
+        for (const [k, exp] of this.loginLock) if (exp <= now) this.loginLock.delete(k);
+        for (const [k, v] of this.loginFresh) if (v.exp <= now) this.loginFresh.delete(k);
     }
 
     private saveLeases(): Promise<void> {
@@ -124,6 +129,25 @@ export class GuardDO {
                 const key = String(b.key), until = Number(b.until);
                 if (Number.isFinite(until)) this.cooldowns[key] = Math.max(until, this.cooldowns[key] ?? 0);
                 await this.state.storage.put("cooldowns", this.cooldowns);
+                return reply({ ok: true });
+            }
+            case "login": { // ok:true = you may log in now; session = somebody just did, use theirs; neither = wait
+                const key = String(b.key);
+                const fresh = this.loginFresh.get(key);
+                if (fresh) return reply({ ok: false, session: fresh.session });
+                if (this.loginLock.has(key)) return reply({ ok: false });
+                this.loginLock.set(key, now + 20_000);
+                return reply({ ok: true });
+            }
+            case "login.done": {
+                const key = String(b.key);
+                this.loginLock.delete(key);
+                if (typeof b.session === "string" && b.session) this.loginFresh.set(key, { session: b.session, exp: now + 20_000 });
+                return reply({ ok: true });
+            }
+            case "login.forget": { // that login was rejected by Telegram: stop handing it out
+                const key = String(b.key);
+                if (this.loginFresh.get(key)?.session === b.session) this.loginFresh.delete(key);
                 return reply({ ok: true });
             }
             case "cooldown.clear":
