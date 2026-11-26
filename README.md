@@ -44,6 +44,25 @@ You need four values, plus an optional fifth. Collect them first and the setup t
 | `ADMIN_IDS` | Optional. Your numeric Telegram user id (ask [@userinfobot](https://t.me/userinfobot)); several ids can be separated by commas. Without it the `/admin` panel stays off. |
 | `BIN_CHANNEL` | Create a **private** channel, add your bot as an **administrator**, then get the channel id (it looks like `-100123456789`). |
 
+## Settings from a gist (no manual variables)
+
+All settings are read at runtime from the file at `GIST_URL` (set in `wrangler.toml` under `[vars]`). The file uses the `.dev.vars` format:
+
+```
+API_ID=
+API_HASH=
+BOT_TOKEN=
+BIN_CHANNEL=
+ADMIN_IDS=
+MIRROR_BOT_TOKEN_1=
+MIRROR_BOT_TOKEN_2=
+```
+
+- `MIRROR_BOT_TOKEN_n` bots are used as helper bots automatically (each must be an admin of `BIN_CHANNEL`). They show up in `/admin` marked `gist`; to remove one, delete its line from the gist.
+- The gist is cached for 60 seconds, so edits apply within about a minute (GitHub's raw CDN may add a few minutes). If GitHub is unreachable the last good copy is used.
+- A value in the gist overrides the same variable set in Cloudflare. If `GIST_URL` is empty, the Worker uses Cloudflare variables as before.
+- Anyone who has the gist URL can read your bot tokens. Use a **secret** gist and never share the link.
+
 ## Deploy
 
 ### Option 1: the button (no terminal)

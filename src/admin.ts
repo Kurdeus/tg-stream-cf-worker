@@ -4,7 +4,7 @@ import { humanSize, type Lang } from "./messages";
 import { A } from "./admin-messages";
 import { guardCall } from "./guard";
 import {
-    getHelpers, saveHelpers, getCooldowns, getMode, setMode, botKey, sessionKey, clearCooldown, HelperBot,
+    getHelpers, getStoredHelpers, saveHelpers, getCooldowns, getMode, setMode, botKey, sessionKey, clearCooldown, HelperBot,
 } from "./bots";
 
 const TOKEN_RE = /^\d{6,12}:[A-Za-z0-9_-]{30,60}$/;
@@ -51,11 +51,12 @@ async function listView(env: Env, lang: Lang): Promise<View> {
     const lines = helpers.map((h, i) => {
         const until = cooldowns[String(h.id)];
         const state = until ? a.cooling(Math.max(1, Math.ceil((until - now) / 1000))) : a.ready;
-        return `${i + 1}. @${h.username} · <code>${h.id}</code> · ${state}`;
+        return `${i + 1}. @${h.username} · <code>${h.id}</code> · ${state}${h.gist ? " · gist" : ""}`;
     });
     const rows: any[] = [];
-    for (let i = 0; i < helpers.length; i += 2) {
-        rows.push(helpers.slice(i, i + 2).map(h => ({ text: `🗑 @${h.username}`, callback_data: `adm:rm:${h.id}` })));
+    const removable = helpers.filter(h => !h.gist); // bots from the gist are removed by editing the gist
+    for (let i = 0; i < removable.length; i += 2) {
+        rows.push(removable.slice(i, i + 2).map(h => ({ text: `🗑 @${h.username}`, callback_data: `adm:rm:${h.id}` })));
     }
     rows.push(back);
     return { text: `${a.listHeader}\n\n${lines.join("\n")}`, reply_markup: { inline_keyboard: rows } };
@@ -168,7 +169,7 @@ async function addHelper(env: Env, rawToken: string, lang: Lang): Promise<AddRes
     const m = await tg(env, "getChatMember", { chat_id: env.BIN_CHANNEL, user_id: bot.id });
     if (!m.ok || !["administrator", "creator"].includes(m.result?.status)) return fail(a.notAdmin(bot.username));
 
-    await saveHelpers(env, [...helpers, { ...bot, token } as HelperBot]);
+    await saveHelpers(env, [...(await getStoredHelpers(env)), { ...bot, token } as HelperBot]);
     await clearCooldown(env, String(bot.id));
     return { ok: true, text: a.added(bot.username, bot.id) };
 }
@@ -238,7 +239,7 @@ export async function handleAdminCallback(env: Env, cq: any, lang: Lang): Promis
         await edit(env, chatId, messageId, await panelView(env, lang));
     } else if (/^adm:rm:\d+$/.test(data)) {
         const id = Number(data.slice("adm:rm:".length));
-        const helpers = await getHelpers(env);
+        const helpers = await getStoredHelpers(env);
         const gone = helpers.find(h => h.id === id);
         if (gone) {
             await saveHelpers(env, helpers.filter(h => h.id !== id));

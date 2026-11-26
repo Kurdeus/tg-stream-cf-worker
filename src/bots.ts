@@ -1,12 +1,13 @@
 import type { Env } from "./env";
 import { guardCall } from "./guard";
+import { tg } from "./telegram";
 
 /**
  * Helper bots are extra bot accounts used ONLY to read files from the storage channel when the
  * main bot is rate limited (FLOOD_WAIT) or fails. They never talk to users.
  * Each helper bot must be an admin of BIN_CHANNEL.
  */
-export interface HelperBot { id: number; username: string; token: string }
+export interface HelperBot { id: number; username: string; token: string; gist?: boolean }
 
 export interface Candidate {
     key: string;      // bot id, used for cooldown bookkeeping and as a cache key
@@ -23,7 +24,8 @@ const MODE_KEY = "bots:mode";
 export const botKey = (token: string) => token.split(":")[0];
 export const sessionKey = (token: string) => "session:gramjs:" + token;
 
-export async function getHelpers(env: Env): Promise<HelperBot[]> {
+/** Helper bots added from the /admin panel (stored in KV). */
+export async function getStoredHelpers(env: Env): Promise<HelperBot[]> {
     try {
         const raw = await env.SESSIONS.get(HELPERS_KEY);
         const list = raw ? JSON.parse(raw) : [];
@@ -33,6 +35,34 @@ export async function getHelpers(env: Env): Promise<HelperBot[]> {
     } catch {
         return [];
     }
+}
+
+const mirrorNames = new Map<string, string>(); // token -> username, per isolate
+
+/** Helper bots listed as MIRROR_BOT_TOKEN_n in the gist. Read-only: edit the gist to add or remove them. */
+async function getMirrorHelpers(env: Env): Promise<HelperBot[]> {
+    const tokens = (env.MIRROR_BOT_TOKENS ?? []).filter(t => /^\d{6,12}:/.test(t));
+    return Promise.all(tokens.map(async (token) => {
+        let username = mirrorNames.get(token);
+        if (!username) {
+            const me = await tg(env, "getMe", {}, token);
+            username = me?.ok && me.result?.username ? String(me.result.username) : `bot${botKey(token)}`;
+            if (me?.ok) mirrorNames.set(token, username);
+        }
+        return { id: Number(botKey(token)), username, token, gist: true };
+    }));
+}
+
+/** All helper bots: the ones from the gist plus the ones added in /admin (no duplicates). */
+export async function getHelpers(env: Env): Promise<HelperBot[]> {
+    const [mirror, stored] = await Promise.all([getMirrorHelpers(env), getStoredHelpers(env)]);
+    const main = botKey(env.BOT_TOKEN);
+    const seen = new Set<number>();
+    return [...mirror, ...stored].filter(h => {
+        if (String(h.id) === main || seen.has(h.id)) return false;
+        seen.add(h.id);
+        return true;
+    });
 }
 
 export async function saveHelpers(env: Env, list: HelperBot[]): Promise<void> {

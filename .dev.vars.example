@@ -1,10 +1,14 @@
+# Format of the file hosted at GIST_URL (wrangler.toml [vars]).
+# The same file also works locally as .dev.vars for `wrangler dev`.
 # Telegram API credentials from https://my.telegram.org
 API_ID=
 API_HASH=
 # Token from @BotFather
 BOT_TOKEN=
-# Private channel id used as storage, like -100123456789 (the bot must be an ADMIN there)
+# Private channel id used as storage, like -100123456789 (every bot must be an ADMIN there)
 BIN_CHANNEL=
 # Your numeric Telegram user id (ask @userinfobot). Several ids can be separated by commas.
-# Needed for the /admin panel where helper bots are added. Leave empty to turn the panel off.
 ADMIN_IDS=
+# Optional helper bots (must be ADMIN of BIN_CHANNEL). Add as many as you like: _1, _2, _3 ...
+MIRROR_BOT_TOKEN_1=
+MIRROR_BOT_TOKEN_2=

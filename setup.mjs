@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // One-command installer:  npm run setup
-// Creates KV namespaces, deploys the Worker, sets secrets and registers the Telegram webhook.
+// Creates KV namespaces, deploys the Worker (settings are read from GIST_URL) and registers the Telegram webhook.
 import { execSync, spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import readline from "node:readline/promises";
 
 const isWin = process.platform === "win32";
 const WORKER = "tg-stream-worker";
@@ -27,22 +26,20 @@ if (!/You are logged in/i.test(wr(["whoami"]).out)) {
   if (wr(["login"], { inherit: true }).code !== 0) die("Cloudflare login failed.");
 }
 
-// 2. Questions -----------------------------------------------------------
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-const ask = async (name, hint) => {
-  const preset = process.env[name];
-  if (preset) return preset.trim();
-  return (await rl.question(`${name} (${hint}): `)).trim();
-};
-const API_ID = await ask("API_ID", "number from https://my.telegram.org");
-const API_HASH = await ask("API_HASH", "string from https://my.telegram.org");
-const BOT_TOKEN = await ask("BOT_TOKEN", "from @BotFather");
-const BIN_CHANNEL = await ask("BIN_CHANNEL", "private channel id like -100123456789, bot must be ADMIN there");
-const ADMIN_IDS = await ask("ADMIN_IDS", "optional: your numeric Telegram id(s) for the /admin panel, comma separated (ask @userinfobot). Press Enter to skip");
-rl.close();
-if (!API_ID || !API_HASH || !BOT_TOKEN || !BIN_CHANNEL) die("All four values are required.");
+// 2. Settings come from the gist (GIST_URL in wrangler.toml) -------------
+const GIST_URL = readFileSync("wrangler.toml", "utf8").match(/^GIST_URL\s*=\s*"([^"]+)"/m)?.[1];
+if (!GIST_URL) die("GIST_URL is missing in wrangler.toml [vars].");
+log("Reading settings from the gist...");
+const gistRes = await fetch(GIST_URL);
+if (!gistRes.ok) die(`Could not download the gist (HTTP ${gistRes.status}). Is the URL correct and public?`);
+const vars = {};
+for (const line of (await gistRes.text()).split(/\r?\n/)) {
+  const m = /^\s*(?:export\s+)?([A-Za-z_]\w*)\s*=\s*(.*?)\s*$/.exec(line);
+  if (m && !line.trim().startsWith("#")) vars[m[1]] = m[2].replace(/^(["'])(.*)\1$/, "$2");
+}
+const { API_ID, API_HASH, BOT_TOKEN, BIN_CHANNEL } = vars;
+if (!API_ID || !API_HASH || !BOT_TOKEN || !BIN_CHANNEL) die("The gist must contain API_ID, API_HASH, BOT_TOKEN and BIN_CHANNEL.");
 if (!/^\d+$/.test(API_ID) || Number(API_ID) > 2147483647) die("API_ID must be the numeric App api_id from https://my.telegram.org (usually 7-8 digits). It is not the bot id or your Telegram user id.");
-if (ADMIN_IDS && !/^\d+([\s,;]+\d+)*$/.test(ADMIN_IDS)) die("ADMIN_IDS must be one or more numeric Telegram user ids separated by commas.");
 if (!/^[0-9a-f]{32}$/i.test(API_HASH)) die("API_HASH must be the 32-character hex string from https://my.telegram.org.");
 if (!/^-100\d+$/.test(BIN_CHANNEL)) die("BIN_CHANNEL must look like -100123456789 (note the -100 prefix).");
 
@@ -89,13 +86,7 @@ if (dep.code !== 0) die("Deploy failed (see output above).");
 const workerUrl = dep.out.match(/https:\/\/[\w.-]+\.workers\.dev/)?.[0];
 if (!workerUrl) die("Deployed, but could not detect the worker URL. Open /setup on it manually.");
 
-// 5. Secrets -------------------------------------------------------------
-log("Uploading secrets...");
-for (const [k, v] of Object.entries({ API_ID, API_HASH, BOT_TOKEN, BIN_CHANNEL, ...(ADMIN_IDS ? { ADMIN_IDS } : {}) })) {
-  const r = wr(["secret", "put", k], { input: v + "\n" });
-  if (r.code !== 0) die(`Failed to set secret ${k}\n${r.out}`);
-  console.log("  set " + k);
-}
+// 5. No secrets to upload: the Worker reads them from the gist at runtime.
 
 // 6. Register webhook & verify ------------------------------------------
 log("Registering Telegram webhook...");

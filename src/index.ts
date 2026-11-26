@@ -3,6 +3,7 @@ import type { Env } from "./env";
 import { tg } from "./telegram";
 import { adminIds, isAdmin, isAwaitingToken, handleAdminCommand, handleAdminCallback, handleAdminToken } from "./admin";
 import { getHelpers } from "./bots";
+import { loadEnv } from "./config";
 
 export type { Env };
 export { GuardDO } from "./guard";
@@ -85,7 +86,9 @@ function json(data: unknown, status = 200): Response {
 }
 
 export default {
-    async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    async fetch(request: Request, rawEnv: Env, ctx: ExecutionContext): Promise<Response> {
+        // Settings come from the gist (GIST_URL); values set in Cloudflare are only the fallback.
+        const env = await loadEnv(rawEnv);
         const url = new URL(request.url);
         const origin = url.origin;
         const botPath = "/bot" + env.BOT_TOKEN;
@@ -144,7 +147,9 @@ export default {
                 return json({
                     ok: !!setHook.ok && hasUrl && missing.length === 0 && apiIdCheck === "OK" && apiHashCheck === "OK",
                     missing_secrets: missing,
+                    gist: rawEnv.GIST_URL ? "configured" : "GIST_URL not set (using Cloudflare variables)",
                     admins_configured: adminIds(env).size,
+                    mirror_bots_in_gist: env.MIRROR_BOT_TOKENS?.length ?? 0,
                     helper_bots: (await getHelpers(env)).length,
                     api_id: apiIdCheck,
                     api_hash: apiHashCheck,
@@ -364,6 +369,6 @@ export class StreamerDO {
         this.env = env;
     }
     async fetch(request: Request): Promise<Response> {
-        return handleStream(request, this.env);
+        return handleStream(request, await loadEnv(this.env));
     }
 }
